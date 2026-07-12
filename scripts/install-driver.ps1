@@ -7,6 +7,18 @@ function Invoke-Native {
   if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $FilePath $Arguments" }
 }
 
+function Get-MiraboxRootDevice {
+  Get-PnpDevice -PresentOnly:$false |
+    Where-Object InstanceId -Like "ROOT\*" |
+    Where-Object {
+      $hardwareIds = Get-PnpDeviceProperty `
+        -InstanceId $_.InstanceId `
+        -KeyName "DEVPKEY_Device_HardwareIds" `
+        -ErrorAction SilentlyContinue
+      @($hardwareIds.Data) -contains "Root\MiraboxN4Pro"
+    }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -17,9 +29,7 @@ if (-not $DriverDirectory) {
 }
 $inf = Get-ChildItem $DriverDirectory -Filter MiraboxN4Pro.inf -Recurse | Select-Object -First 1
 if (-not $inf) { throw "MiraboxN4Pro.inf was not found under $DriverDirectory" }
-$existingDevice = Get-PnpDevice -PresentOnly:$false |
-  Where-Object InstanceId -Like "ROOT\MIRABOXN4PRO*" |
-  Select-Object -First 1
+$existingDevices = @(Get-MiraboxRootDevice)
 
 $certificate = Get-ChildItem $DriverDirectory -Filter *.cer -Recurse | Select-Object -First 1
 if ($certificate) {
@@ -35,13 +45,15 @@ if (-not ([System.Management.Automation.PSTypeName]'Mirabox.Emulator.Install.Roo
   Add-Type -Path $helperPath
 }
 
-if ($existingDevice) {
-  Write-Host "Updating driver for $($existingDevice.InstanceId)..."
+if ($existingDevices.Count -gt 0) {
+  Write-Host "Updating driver for $($existingDevices.Count) existing virtual Mirabox device(s)..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Update(
     $inf.FullName,
     "Root\MiraboxN4Pro"
   )
-  Invoke-Native -FilePath "pnputil.exe" -Arguments @("/restart-device", $existingDevice.InstanceId)
+  foreach ($device in $existingDevices) {
+    Invoke-Native -FilePath "pnputil.exe" -Arguments @("/restart-device", $device.InstanceId)
+  }
 } else {
   Write-Host "Creating the persistent ROOT\MiraboxN4Pro device..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
