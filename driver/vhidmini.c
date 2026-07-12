@@ -327,10 +327,9 @@ CompletePendingRead(PDEVICE_CONTEXT Context)
 static NTSTATUS
 CopyInputReport(WDFREQUEST Request, const UCHAR* Payload)
 {
-    UCHAR report[N4PRO_HID_INPUT_REPORT_SIZE];
-    report[0] = 0;
-    RtlCopyMemory(report + 1, Payload, N4PRO_INPUT_REPORT_SIZE);
-    return RequestCopyFromBuffer(Request, report, sizeof(report));
+    /* HIDClass adds the leading zero report ID for user-mode clients. The
+     * UMDF minidriver completes IOCTL_HID_READ_REPORT with payload only. */
+    return RequestCopyFromBuffer(Request, Payload, N4PRO_INPUT_REPORT_SIZE);
 }
 
 static VOID
@@ -405,7 +404,7 @@ GetInputReport(WDFREQUEST Request)
     UCHAR payload[N4PRO_INPUT_REPORT_SIZE];
     NTSTATUS status = RequestGetHidXferPacketToRead(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != 0 || packet.reportBufferLen < N4PRO_HID_INPUT_REPORT_SIZE)
+    if (packet.reportId != 0 || packet.reportBufferLen < N4PRO_INPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
     RtlZeroMemory(payload, sizeof(payload));
     RtlCopyMemory(payload, FirmwareVersion, sizeof(FirmwareVersion));
