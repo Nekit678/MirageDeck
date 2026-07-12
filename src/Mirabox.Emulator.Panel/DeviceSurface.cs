@@ -7,12 +7,14 @@ internal sealed class DeviceSurface : Control
 {
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
+    private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
     private readonly Image?[] _keys = new Image?[10];
     private readonly Image?[] _secondaryKeys = new Image?[4];
     private readonly RectangleF[] _keyRects = new RectangleF[10];
     private readonly RectangleF[] _knobRects = new RectangleF[4];
+    private readonly System.Windows.Forms.Timer _touchReportTimer = new() { Interval = TouchReportIntervalMs };
     private RectangleF _touchRect;
     private int _activeKey = -1;
     private int _activeKnob = -1;
@@ -21,13 +23,15 @@ internal sealed class DeviceSurface : Control
     private int _hoverKnob = -1;
     private int _hoverSecondary = -1;
     private Point _touchStart;
+    private Point? _pendingTouchLocation;
+    private Point? _lastTouchLocation;
+    private long _lastTouchReportAt;
     private bool _touching;
     private bool _hoverTouch;
     private TouchDisplayMode _touchMode = TouchDisplayMode.Button;
 
     public event Action<byte[], string>? InputGenerated;
     public event Action<string>? StatusChanged;
-    public event Action? TouchModeSelected;
     public byte Brightness { get; set; } = 100;
     public Image? BackgroundImageValue { get; private set; }
     public TouchDisplayMode TouchMode => _touchMode;
@@ -39,6 +43,7 @@ internal sealed class DeviceSurface : Control
         ForeColor = Palette.PrimaryText;
         MinimumSize = new Size(700, 430);
         SetStyle(ControlStyles.Selectable | ControlStyles.ResizeRedraw, true);
+        _touchReportTimer.Tick += (_, _) => FlushPendingTouch();
     }
 
     public void SetKeyImage(int index, Image image)
@@ -341,11 +346,14 @@ internal sealed class DeviceSurface : Control
             }
         if (_touchRect.Contains(e.Location))
         {
+            _touchReportTimer.Stop();
+            _pendingTouchLocation = null;
+            _lastTouchLocation = null;
             _touching = true;
             _touchStart = e.Location;
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
             if (_touchMode == TouchDisplayMode.TouchBar)
-                EmitTouch(e.Location);
+                EmitTouch(e.Location, force: true);
             Invalidate();
         }
     }
@@ -389,6 +397,8 @@ internal sealed class DeviceSurface : Control
         }
         if (_touching && !TrySwitchTouchMode(e.Location))
         {
+            if (_touchMode == TouchDisplayMode.TouchBar)
+                FlushPendingTouch();
             var deltaX = e.X - _touchStart.X;
             var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
             if (horizontalSwipe)
@@ -439,6 +449,9 @@ internal sealed class DeviceSurface : Control
         _touchMode = mode;
         _activeSecondary = -1;
         _hoverSecondary = -1;
+        _pendingTouchLocation = null;
+        _lastTouchLocation = null;
+        _touchReportTimer.Stop();
         StatusChanged?.Invoke(mode == TouchDisplayMode.Button
             ? "Button Mode: экран связан с четырьмя энкодерами"
             : "Touchbar Mode: экран принимает координатные касания");
@@ -454,9 +467,9 @@ internal sealed class DeviceSurface : Control
             return false;
 
         var mode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
-        var changed = _touchMode != mode;
         SetTouchMode(mode);
-        if (changed) TouchModeSelected?.Invoke();
+        _touchReportTimer.Stop();
+        _pendingTouchLocation = null;
         _touching = false;
         _activeSecondary = -1;
         return true;
@@ -468,11 +481,38 @@ internal sealed class DeviceSurface : Control
     private RectangleF TouchSegment(int index) =>
         new(_touchRect.Left + index * _touchRect.Width / 4, _touchRect.Top, _touchRect.Width / 4, _touchRect.Height);
 
-    private void EmitTouch(Point location)
+    private void EmitTouch(Point location, bool force = false)
     {
+        if (_lastTouchLocation == location)
+        {
+            _pendingTouchLocation = null;
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (!force && now - _lastTouchReportAt < TouchReportIntervalMs)
+        {
+            // MouseMove may run much faster than the HID consumer. Retain only
+            // the newest point so stale coordinates cannot make scrolling lag.
+            _pendingTouchLocation = location;
+            _touchReportTimer.Start();
+            return;
+        }
+
+        _touchReportTimer.Stop();
+        _pendingTouchLocation = null;
+        _lastTouchLocation = location;
+        _lastTouchReportAt = now;
         var x = (ushort)Math.Clamp((location.X - _touchRect.Left) / _touchRect.Width * LogicalWidth, 0, LogicalWidth - 1);
         var y = (ushort)Math.Clamp((location.Y - _touchRect.Top) / _touchRect.Height * LogicalHeight, 0, LogicalHeight - 1);
         Emit(InputReportFactory.Touch(x, y), $"Touch: {x}, {y}");
+    }
+
+    private void FlushPendingTouch()
+    {
+        _touchReportTimer.Stop();
+        if (_pendingTouchLocation is { } location)
+            EmitTouch(location, force: true);
     }
 
     private void Emit(byte[] report, string description) => InputGenerated?.Invoke(report, description);
@@ -484,6 +524,7 @@ internal sealed class DeviceSurface : Control
     {
         if (disposing)
         {
+            _touchReportTimer.Dispose();
             foreach (var image in _keys) image?.Dispose();
             foreach (var image in _secondaryKeys) image?.Dispose();
             BackgroundImageValue?.Dispose();

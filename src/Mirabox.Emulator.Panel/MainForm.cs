@@ -11,7 +11,9 @@ internal sealed class MainForm : Form
     private readonly MiraboxProtocolDecoder _decoder = new();
     private readonly CancellationTokenSource _shutdown = new();
     private HidDevice? _device;
-    private bool _hasExplicitTouchMode;
+    // A local vertical swipe must not set this flag: the next layer update from
+    // Stream Dock is what brings the virtual display back in sync with its UI.
+    private bool _hasProtocolTouchMode;
 
     public MainForm()
     {
@@ -26,7 +28,6 @@ internal sealed class MainForm : Form
         _status.SetStatus("Инициализация виртуального HID-устройства…", StatusKind.Connecting);
         _surface.InputGenerated += Inject;
         _surface.StatusChanged += message => SetStatus(message, StatusKind.Activity);
-        _surface.TouchModeSelected += () => _hasExplicitTouchMode = true;
         Shown += (_, _) => Connect();
         FormClosed += (_, _) => _shutdown.Cancel();
     }
@@ -95,14 +96,14 @@ internal sealed class MainForm : Form
                 var secondary = N4ProProfile.SecondaryKeyForImageSlot(image.Slot);
                 if (secondary >= 0)
                 {
-                    if (!_hasExplicitTouchMode) _surface.SetTouchMode(TouchDisplayMode.Button);
+                    if (!_hasProtocolTouchMode) _surface.SetTouchMode(TouchDisplayMode.Button);
                     _surface.SetSecondaryImage(secondary, DecodeImage(image.EncodedImage));
                     SetStatus($"Изображение touch-кнопки {secondary + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
                 }
             }
             break;
         case BackgroundUpdate background:
-            if (!_hasExplicitTouchMode) _surface.SetTouchMode(TouchDisplayMode.TouchBar);
+            if (!_hasProtocolTouchMode) _surface.SetTouchMode(TouchDisplayMode.TouchBar);
             _surface.SetBackground(DecodeImage(background.EncodedImage));
             SetStatus($"Фон обновлён: {background.EncodedImage.Length:N0} байт", StatusKind.Activity);
             break;
@@ -123,7 +124,7 @@ internal sealed class MainForm : Form
             SetStatus("Экран включён", StatusKind.Success);
             break;
         case TouchModeUpdate mode:
-            _hasExplicitTouchMode = true;
+            _hasProtocolTouchMode = true;
             _surface.SetTouchMode(mode.TouchBar ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button);
             break;
         }
