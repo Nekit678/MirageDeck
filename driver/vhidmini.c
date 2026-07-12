@@ -177,15 +177,44 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
     static const UCHAR sidePrefix[] = { 'M', 'B', 'V', 'E' };
     WDFMEMORY inputMemory;
+    WDFMEMORY outputMemory;
     const UCHAR* report;
     const UCHAR* payload;
     size_t reportLength;
+    size_t outputLength;
     ULONG tail;
-    NTSTATUS status = WdfRequestRetrieveInputMemory(Request, &inputMemory);
-    if (!NT_SUCCESS(status)) return status;
+    NTSTATUS status;
+
+    Context->LastWriteStage = 1;
+    Context->LastWriteStatus = STATUS_SUCCESS;
+    Context->LastWriteInputLength = 0;
+    Context->LastWriteOutputLength = 0;
+
+    /* This ordering matches Microsoft's UMDF vhidmini2 helper. mshidumdf
+     * exposes the report buffer as input memory only after the auxiliary
+     * output memory for the report ID has been retrieved. */
+    status = WdfRequestRetrieveOutputMemory(Request, &outputMemory);
+    if (!NT_SUCCESS(status)) {
+        Context->LastWriteStage = 2;
+        Context->LastWriteStatus = status;
+        return status;
+    }
+    WdfMemoryGetBuffer(outputMemory, &outputLength);
+    Context->LastWriteOutputLength = (ULONG)outputLength;
+
+    status = WdfRequestRetrieveInputMemory(Request, &inputMemory);
+    if (!NT_SUCCESS(status)) {
+        Context->LastWriteStage = 3;
+        Context->LastWriteStatus = status;
+        return status;
+    }
     report = (const UCHAR*)WdfMemoryGetBuffer(inputMemory, &reportLength);
-    if (reportLength < N4PRO_OUTPUT_REPORT_SIZE)
+    Context->LastWriteInputLength = (ULONG)reportLength;
+    if (reportLength < N4PRO_OUTPUT_REPORT_SIZE) {
+        Context->LastWriteStage = 4;
+        Context->LastWriteStatus = STATUS_INVALID_BUFFER_SIZE;
         return STATUS_INVALID_BUFFER_SIZE;
+    }
     if (reportLength >= N4PRO_HID_OUTPUT_REPORT_SIZE && report[0] == 0)
         payload = report + 1;
     else
@@ -197,6 +226,8 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     if (RtlCompareMemory(payload, sidePrefix, sizeof(sidePrefix)) == sizeof(sidePrefix)
         && payload[4] == N4PRO_SIDE_INJECT_INPUT) {
         status = SubmitInput(Context, payload + 5);
+        Context->LastWriteStage = 5;
+        Context->LastWriteStatus = status;
         WdfRequestSetInformation(Request, reportLength);
         return status;
     }
@@ -214,6 +245,8 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     WdfWaitLockRelease(Context->RingLock);
     CompletePendingRead(Context);
 
+    Context->LastWriteStage = 6;
+    Context->LastWriteStatus = STATUS_SUCCESS;
     WdfRequestSetInformation(Request, reportLength);
     return STATUS_SUCCESS;
 }
@@ -343,6 +376,14 @@ GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
         RtlCopyMemory(side->Data, Context->OutputRing[Context->OutputHead], N4PRO_OUTPUT_REPORT_SIZE);
         Context->OutputHead = (Context->OutputHead + 1) % N4PRO_RING_CAPACITY;
         Context->OutputCount--;
+    } else {
+        ULONG diagnostic[5];
+        diagnostic[0] = N4PRO_DIAGNOSTIC_MAGIC;
+        diagnostic[1] = Context->LastWriteStage;
+        diagnostic[2] = (ULONG)Context->LastWriteStatus;
+        diagnostic[3] = Context->LastWriteInputLength;
+        diagnostic[4] = Context->LastWriteOutputLength;
+        RtlCopyMemory(side->Data, diagnostic, sizeof(diagnostic));
     }
     WdfWaitLockRelease(Context->RingLock);
     if (packet.reportBufferLen >= N4PRO_FEATURE_REPORT_SIZE)

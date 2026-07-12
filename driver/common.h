@@ -11,6 +11,7 @@
 #define N4PRO_SIDE_INJECT_INPUT  1u
 #define N4PRO_SIDE_OUTPUT_PACKET 2u
 #define N4PRO_SIDE_NO_PACKET     3u
+#define N4PRO_DIAGNOSTIC_MAGIC   0x47414944u /* "DIAG" as little endian */
 
 #include <pshpack1.h>
 typedef struct _N4PRO_SIDE_REPORT {

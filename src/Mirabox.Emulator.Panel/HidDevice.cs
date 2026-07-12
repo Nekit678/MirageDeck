@@ -21,6 +21,7 @@ internal sealed class HidDevice : IDisposable
     private readonly SafeFileHandle _handle;
     private readonly int _outputReportLength;
     private readonly int _featureReportLength;
+    private readonly object _ioLock = new();
 
     private HidDevice(SafeFileHandle handle, int outputReportLength, int featureReportLength)
     {
@@ -94,11 +95,15 @@ internal sealed class HidDevice : IDisposable
         BitConverter.TryWriteBytes(output.AsSpan(1, 4), SideMagic);
         output[5] = 1;
         report.CopyTo(output.AsSpan(6));
-        if (!HidD_SetOutputReport(_handle, output, output.Length))
+        lock (_ioLock)
         {
-            var error = Marshal.GetLastWin32Error();
-            throw new Win32Exception(error,
-                $"HidD_SetOutputReport завершился ошибкой {error} (buffer={output.Length})");
+            if (!HidD_SetOutputReport(_handle, output, output.Length))
+            {
+                var error = Marshal.GetLastWin32Error();
+                var diagnostic = TryGetDriverDiagnostic();
+                throw new Win32Exception(error,
+                    $"HidD_SetOutputReport: Win32={error}, buffer={output.Length}; {diagnostic}");
+            }
         }
     }
 
@@ -106,11 +111,14 @@ internal sealed class HidDevice : IDisposable
     {
         var feature = new byte[_featureReportLength];
         feature[0] = 0;
-        if (!HidD_GetFeature(_handle, feature, feature.Length))
+        lock (_ioLock)
         {
-            var error = Marshal.GetLastWin32Error();
-            throw new Win32Exception(error,
-                $"HidD_GetFeature завершился ошибкой {error} (buffer={feature.Length})");
+            if (!HidD_GetFeature(_handle, feature, feature.Length))
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw new Win32Exception(error,
+                    $"HidD_GetFeature завершился ошибкой {error} (buffer={feature.Length})");
+            }
         }
         if (BitConverter.ToUInt32(feature, 1) != SideMagic || feature[5] != 2)
         {
@@ -119,6 +127,32 @@ internal sealed class HidDevice : IDisposable
         }
         packet = feature.AsSpan(10, N4ProProfile.OutputReportLength).ToArray();
         return true;
+    }
+
+    private string TryGetDriverDiagnostic()
+    {
+        try
+        {
+            for (var attempt = 0; attempt < 8; attempt++)
+            {
+                var feature = new byte[_featureReportLength];
+                feature[0] = 0;
+                if (!HidD_GetFeature(_handle, feature, feature.Length))
+                    return $"diagnostic GET_FEATURE failed: {Marshal.GetLastWin32Error()}";
+                if (feature[5] != 3 || BitConverter.ToUInt32(feature, 10) != 0x47414944)
+                    continue;
+                var stage = BitConverter.ToUInt32(feature, 14);
+                var status = BitConverter.ToUInt32(feature, 18);
+                var input = BitConverter.ToUInt32(feature, 22);
+                var output = BitConverter.ToUInt32(feature, 26);
+                return $"driver stage={stage}, NTSTATUS=0x{status:X8}, input={input}, output={output}";
+            }
+            return "driver diagnostic unavailable";
+        }
+        catch (Exception error)
+        {
+            return $"driver diagnostic exception: {error.Message}";
+        }
     }
 
     private static (int Output, int Feature) GetReportLengths(SafeFileHandle handle)
