@@ -37,6 +37,7 @@ function Find-WdkTool {
 
 if (-not $IsWindows) { throw "Driver packaging must run on Windows" }
 if (-not (Test-Path $PanelPublishDirectory)) { throw "Panel publish directory was not found: $PanelPublishDirectory" }
+Write-Host "[package] Locating build outputs"
 
 $driverDll = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.dll -File -Recurse |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
@@ -49,11 +50,13 @@ $driverOutput = Join-Path $OutputDirectory "driver"
 $panelOutput = Join-Path $OutputDirectory "panel"
 $scriptsOutput = Join-Path $OutputDirectory "scripts"
 New-Item $driverOutput, $panelOutput, $scriptsOutput -ItemType Directory -Force | Out-Null
+Write-Host "[package] Copying panel, driver, scripts, and documentation"
 Copy-Item $driverDll.FullName, $driverInf.FullName -Destination $driverOutput
 Copy-Item (Join-Path $PanelPublishDirectory "*") -Destination $panelOutput -Recurse
 Copy-Item "scripts/install-driver.ps1", "scripts/uninstall-driver.ps1", "scripts/verify-package.ps1" -Destination $scriptsOutput
 Copy-Item "DISTRIBUTION.md" -Destination (Join-Path $OutputDirectory "START-HERE.md")
 
+Write-Host "[package] Creating ephemeral test-signing certificate"
 $certificate = New-SelfSignedCertificate `
   -Type Custom `
   -Subject "CN=Mirabox HID Emulator Test" `
@@ -66,25 +69,33 @@ $certificate = New-SelfSignedCertificate `
   -NotAfter (Get-Date).AddYears(2) `
   -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
 
+Write-Host "[package] Exporting and trusting test certificate"
 $certificatePath = Join-Path $driverOutput "MiraboxHIDEmulator-Test.cer"
 Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT | Out-Null
 Import-Certificate -FilePath $certificatePath -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
 Import-Certificate -FilePath $certificatePath -CertStoreLocation "Cert:\CurrentUser\TrustedPublisher" | Out-Null
 
+Write-Host "[package] Locating SignTool and Inf2Cat"
 $signTool = Find-WdkTool "signtool.exe"
 $inf2Cat = Find-WdkTool "inf2cat.exe"
+Write-Host "[package] SignTool: $signTool"
+Write-Host "[package] Inf2Cat: $inf2Cat"
 $packagedDll = Join-Path $driverOutput "MiraboxN4Pro.dll"
 $catalog = Join-Path $driverOutput "MiraboxN4Pro.cat"
 
 # The catalog hashes the driver binary, so embed-sign the DLL first, create the
 # catalog second, and sign the completed catalog last.
+Write-Host "[package] Signing driver DLL"
 Invoke-Native $signTool sign /v /fd SHA256 /sha1 $certificate.Thumbprint $packagedDll
+Write-Host "[package] Creating driver catalog"
 Invoke-Native $inf2Cat "/driver:$driverOutput" /os:10_X64 /uselocaltime
 if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create MiraboxN4Pro.cat" }
+Write-Host "[package] Signing and verifying catalog"
 Invoke-Native $signTool sign /v /fd SHA256 /sha1 $certificate.Thumbprint $catalog
 Invoke-Native $signTool verify /pa /v $packagedDll
 Invoke-Native $signTool verify /pa /v $catalog
 
+Write-Host "[package] Writing build metadata and SHA-256 checksums"
 $buildInfo = @(
   "Build commit: $($env:BUILD_COMMIT ?? 'local')"
   "Build run: $($env:BUILD_RUN ?? 'local')"
