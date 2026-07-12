@@ -1,37 +1,50 @@
 param([string]$DriverDirectory = "")
 $ErrorActionPreference = "Stop"
+
+function Invoke-Native {
+  param([Parameter(Mandatory)][string]$FilePath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+  & $FilePath @Arguments
+  if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $FilePath $Arguments" }
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-  throw "Запустите PowerShell от имени администратора"
+  throw "Run PowerShell as Administrator."
 }
 if (-not $DriverDirectory) {
   $DriverDirectory = Join-Path (Split-Path -Parent $PSScriptRoot) "driver\x64\Debug"
 }
 $inf = Get-ChildItem $DriverDirectory -Filter MiraboxN4Pro.inf -Recurse | Select-Object -First 1
-if (-not $inf) { throw "MiraboxN4Pro.inf не найден в $DriverDirectory" }
+if (-not $inf) { throw "MiraboxN4Pro.inf was not found under $DriverDirectory" }
 if (Get-PnpDevice -PresentOnly | Where-Object InstanceId -Like "ROOT\MIRABOXN4PRO*") {
-  Write-Host "Виртуальный Mirabox уже установлен."
+  Write-Host "The virtual Mirabox device is already installed."
   exit 0
 }
 
 $certificate = Get-ChildItem $DriverDirectory -Filter *.cer -Recurse | Select-Object -First 1
 if ($certificate) {
-  & certutil.exe -f -addstore Root $certificate.FullName
-  & certutil.exe -f -addstore TrustedPublisher $certificate.FullName
+  Invoke-Native certutil.exe -f -addstore Root $certificate.FullName
+  Invoke-Native certutil.exe -f -addstore TrustedPublisher $certificate.FullName
 }
-& pnputil.exe /add-driver $inf.FullName /install
-$devgen = Get-Command devgen.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
-if (-not $devgen) {
-  $kitsTools = "${env:ProgramFiles(x86)}\Windows Kits\10\Tools"
-  $devgen = Get-ChildItem $kitsTools -Filter devgen.exe -Recurse -ErrorAction SilentlyContinue |
-    Where-Object FullName -Match '\\x64\\devgen\.exe$' |
-    Sort-Object FullName -Descending |
-    Select-Object -First 1 -ExpandProperty FullName
+
+Invoke-Native pnputil.exe /add-driver $inf.FullName /install
+
+$helperPath = Join-Path $PSScriptRoot "RootDeviceInstaller.cs"
+if (-not (Test-Path $helperPath)) { throw "SetupAPI helper was not found: $helperPath" }
+if (-not ([System.Management.Automation.PSTypeName]'Mirabox.Emulator.Install.RootDeviceInstaller').Type) {
+  Add-Type -Path $helperPath
 }
-if (-not $devgen) {
-  throw "devgen.exe отсутствует. Требуется Windows 11 22H2+; либо выполните: devcon install `"$($inf.FullName)`" Root\MiraboxN4Pro"
+
+Write-Host "Creating the persistent ROOT\MiraboxN4Pro device..."
+$rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
+  $inf.FullName,
+  "Root\MiraboxN4Pro"
+)
+Invoke-Native pnputil.exe /scan-devices
+
+if ($rebootRequired) {
+  Write-Host "The virtual Mirabox device was installed. Restart Windows before launching the panel."
+} else {
+  Write-Host "The virtual Mirabox device was installed. Launch the panel, then Stream Dock."
 }
-& $devgen /add /bus ROOT /hardwareid Root\MiraboxN4Pro
-& pnputil.exe /scan-devices
-Write-Host "Виртуальный Mirabox установлен. Запустите панель, затем Stream Dock."

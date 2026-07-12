@@ -50,6 +50,8 @@ function Find-WdkTool {
 
 if (-not $IsWindows) { throw "Driver packaging must run on Windows" }
 if (-not (Test-Path $PanelPublishDirectory)) { throw "Panel publish directory was not found: $PanelPublishDirectory" }
+Write-Host "[package] Validating the SetupAPI root-device helper"
+Add-Type -Path "scripts/RootDeviceInstaller.cs"
 Write-Host "[package] Locating build outputs"
 
 $driverDll = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.dll -File -Recurse |
@@ -66,7 +68,7 @@ New-Item $driverOutput, $panelOutput, $scriptsOutput -ItemType Directory -Force 
 Write-Host "[package] Copying panel, driver, scripts, and documentation"
 Copy-Item $driverDll.FullName, $driverInf.FullName -Destination $driverOutput
 Copy-Item (Join-Path $PanelPublishDirectory "*") -Destination $panelOutput -Recurse
-Copy-Item "scripts/install-driver.ps1", "scripts/uninstall-driver.ps1", "scripts/verify-package.ps1" -Destination $scriptsOutput
+Copy-Item "scripts/install-driver.ps1", "scripts/RootDeviceInstaller.cs", "scripts/uninstall-driver.ps1", "scripts/verify-package.ps1" -Destination $scriptsOutput
 Copy-Item "DISTRIBUTION.md" -Destination (Join-Path $OutputDirectory "START-HERE.md")
 
 Write-Host "[package] Creating ephemeral test-signing certificate"
