@@ -94,14 +94,12 @@ internal sealed class HidDevice : IDisposable
         BitConverter.TryWriteBytes(output.AsSpan(1, 4), SideMagic);
         output[5] = 1;
         report.CopyTo(output.AsSpan(6));
-        if (!WriteFile(_handle, output, output.Length, out var written, IntPtr.Zero))
+        if (!HidD_SetOutputReport(_handle, output, output.Length))
         {
             var error = Marshal.GetLastWin32Error();
             throw new Win32Exception(error,
-                $"WriteFile завершился ошибкой {error} (buffer={output.Length})");
+                $"HidD_SetOutputReport завершился ошибкой {error} (buffer={output.Length})");
         }
-        if (written != output.Length)
-            throw new IOException($"WriteFile записал {written} из {output.Length} байт.");
     }
 
     public bool TryReadOutput(out byte[] packet)
@@ -180,11 +178,9 @@ internal sealed class HidDevice : IDisposable
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WriteFile(SafeFileHandle handle, byte[] buffer, int bytesToWrite,
-        out int bytesWritten, IntPtr overlapped);
+    private static extern bool HidD_SetOutputReport(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);

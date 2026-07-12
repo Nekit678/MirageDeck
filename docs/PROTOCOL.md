@@ -18,7 +18,7 @@
 
 К оригинальной Input/Output-части descriptor добавлен unnumbered feature report
 для чтения панелью перехваченных пакетов. Входные события панель передаёт через
-обычный Output report с magic `MBVE`; драйвер отличает его от команд `CRT`.
+`HidD_SetOutputReport` с magic `MBVE`; драйвер отличает его от команд `CRT`.
 Точные длины обоих буферов панель получает через `HidP_GetCaps`. Для записи
 unnumbered Output report драйвер читает входную WDF memory напрямую: служебный
 канал `mshidumdf` для report ID в этом случае может вообще отсутствовать.
