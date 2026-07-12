@@ -4,11 +4,15 @@ public static class InputReportFactory
 {
     public static byte[] Key(byte hardwareCode, bool pressed) => Event(hardwareCode, pressed ? (byte)1 : (byte)0);
 
-    public static byte[] KnobPress(int knob, bool pressed)
+    /// <summary>
+    /// N4 Pro encoders report a single press event. Unlike the main keys, the
+    /// firmware does not produce a matching release packet.
+    /// </summary>
+    public static byte[] KnobPress(int knob)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(knob);
         if (knob >= N4ProProfile.KnobPressCodes.Length) throw new ArgumentOutOfRangeException(nameof(knob));
-        return Event(N4ProProfile.KnobPressCodes[knob], pressed ? (byte)1 : (byte)0);
+        return Event(N4ProProfile.KnobPressCodes[knob], 1);
     }
 
     public static byte[] KnobRotate(int knob, int direction)
@@ -20,6 +24,17 @@ public static class InputReportFactory
     }
 
     public static byte[] Swipe(bool left) => Event(left ? (byte)0x38 : (byte)0x39, 0);
+
+    /// <summary>
+    /// In Knob Mode the four touchscreen slots report one release-style event
+    /// (0x40..0x43, state=0) when tapped.
+    /// </summary>
+    public static byte[] SecondaryTap(int index)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(index);
+        if (index >= N4ProProfile.SecondaryKeyCodes.Length) throw new ArgumentOutOfRangeException(nameof(index));
+        return Event(N4ProProfile.SecondaryKeyCodes[index], 0);
+    }
 
     public static byte[] Touch(ushort x, ushort y)
     {
@@ -57,4 +72,3 @@ public static class InputReportFactory
         return report;
     }
 }
-

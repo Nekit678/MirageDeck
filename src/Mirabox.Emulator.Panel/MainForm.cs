@@ -24,6 +24,7 @@ internal sealed class MainForm : Form
         Controls.Add(_status);
         _status.SetStatus("Инициализация виртуального HID-устройства…", StatusKind.Connecting);
         _surface.InputGenerated += Inject;
+        _surface.StatusChanged += message => SetStatus(message, StatusKind.Activity);
         Shown += (_, _) => Connect();
         FormClosed += (_, _) => _shutdown.Cancel();
     }

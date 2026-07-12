@@ -5,6 +5,10 @@ var tests = new (string Name, Action Run)[]
 {
     ("input key packet", TestInputKey),
     ("input knob packet", TestInputKnob),
+    ("input knob press packet", TestInputKnobPress),
+    ("input secondary tap packet", TestInputSecondaryTap),
+    ("input touch point packet", TestInputTouchPoint),
+    ("input swipe packet", TestInputSwipe),
     ("brightness command", TestBrightness),
     ("fragmented key image", TestImage),
     ("background image", TestBackground),
@@ -34,6 +38,42 @@ static void TestInputKnob()
     var report = InputReportFactory.KnobRotate(2, -1);
     Equal((byte)0x90, report[9]);
     Equal((byte)0, report[10]);
+}
+
+static void TestInputKnobPress()
+{
+    var report = InputReportFactory.KnobPress(0);
+    Equal((byte)0x37, report[9]);
+    Equal((byte)1, report[10]);
+}
+
+static void TestInputSecondaryTap()
+{
+    var report = InputReportFactory.SecondaryTap(3);
+    Equal((byte)0x43, report[9]);
+    Equal((byte)0, report[10]);
+}
+
+static void TestInputTouchPoint()
+{
+    var report = InputReportFactory.Touch(0x0123, 0x0456);
+    Equal((byte)'A', report[4]);
+    Equal((byte)'R', report[5]);
+    Equal((byte)'X', report[6]);
+    Equal((byte)0x01, report[10]);
+    Equal((byte)0x23, report[11]);
+    Equal((byte)0x04, report[12]);
+    Equal((byte)0x56, report[13]);
+}
+
+static void TestInputSwipe()
+{
+    var left = InputReportFactory.Swipe(true);
+    var right = InputReportFactory.Swipe(false);
+    Equal((byte)0x38, left[9]);
+    Equal((byte)0x39, right[9]);
+    Equal((byte)0, left[10]);
+    Equal((byte)0, right[10]);
 }
 
 static void TestBrightness()
@@ -104,4 +144,3 @@ static void True(bool value)
 {
     if (!value) throw new Exception("Expected true");
 }
-

@@ -22,10 +22,14 @@ internal sealed class DeviceSurface : Control
     private int _hoverSecondary = -1;
     private Point _touchStart;
     private bool _touching;
+    private bool _hoverTouch;
+    private TouchDisplayMode _touchMode = TouchDisplayMode.Knob;
 
     public event Action<byte[], string>? InputGenerated;
+    public event Action<string>? StatusChanged;
     public byte Brightness { get; set; } = 100;
     public Image? BackgroundImageValue { get; private set; }
+    public TouchDisplayMode TouchMode => _touchMode;
 
     public DeviceSurface()
     {
@@ -140,7 +144,7 @@ internal sealed class DeviceSurface : Control
             DrawKnob(e.Graphics, i, _knobRects[i], scale);
         }
 
-        DrawHint(e.Graphics, At(160, 371, 480, 24), scale);
+        DrawHint(e.Graphics, At(125, 371, 550, 24), scale);
     }
 
     private void DrawKey(Graphics graphics, int index, RectangleF rect, float scale)
@@ -202,21 +206,29 @@ internal sealed class DeviceSurface : Control
         if (BackgroundImageValue is not null)
             graphics.DrawImage(BackgroundImageValue, _touchRect);
 
-        for (var i = 0; i < _secondaryKeys.Length; i++)
+        if (_touchMode == TouchDisplayMode.Knob)
         {
-            var segment = TouchSegment(i);
-            if (_secondaryKeys[i] is not null)
-                graphics.DrawImage(_secondaryKeys[i]!, segment);
-            if (i == _hoverSecondary || i == _activeSecondary)
+            for (var i = 0; i < _secondaryKeys.Length; i++)
             {
-                using var hover = new SolidBrush(Color.FromArgb(i == _activeSecondary ? 55 : 28, Palette.Accent));
-                graphics.FillRectangle(hover, segment);
+                var segment = TouchSegment(i);
+                if (_secondaryKeys[i] is not null)
+                    graphics.DrawImage(_secondaryKeys[i]!, segment);
+                if (i == _hoverSecondary || i == _activeSecondary)
+                {
+                    using var hover = new SolidBrush(Color.FromArgb(i == _activeSecondary ? 55 : 28, Palette.Accent));
+                    graphics.FillRectangle(hover, segment);
+                }
+                if (i > 0)
+                {
+                    using var divider = new Pen(Palette.TouchDivider, Math.Max(1, scale));
+                    graphics.DrawLine(divider, segment.Left, segment.Top + 10 * scale, segment.Left, segment.Bottom - 10 * scale);
+                }
             }
-            if (i > 0)
-            {
-                using var divider = new Pen(Palette.TouchDivider, Math.Max(1, scale));
-                graphics.DrawLine(divider, segment.Left, segment.Top + 10 * scale, segment.Left, segment.Bottom - 10 * scale);
-            }
+        }
+        else if (_hoverTouch || _touching)
+        {
+            using var hover = new SolidBrush(Color.FromArgb(_touching ? 35 : 18, Palette.Accent));
+            graphics.FillRectangle(hover, _touchRect);
         }
 
         graphics.Restore(clipState);
@@ -225,7 +237,7 @@ internal sealed class DeviceSurface : Control
                    Math.Max(1f, (_touching ? 2f : 1.5f) * scale)))
             graphics.DrawRoundedRectangle(border, _touchRect, radius);
 
-        if (BackgroundImageValue is null && _secondaryKeys.All(image => image is null))
+        if (_touchMode == TouchDisplayMode.TouchBar && BackgroundImageValue is null)
         {
             using var titleFont = new Font(Font.FontFamily, Math.Max(8f, 10f * scale), FontStyle.Bold, GraphicsUnit.Pixel);
             using var hintFont = new Font(Font.FontFamily, Math.Max(7f, 8.5f * scale), FontStyle.Regular, GraphicsUnit.Pixel);
@@ -237,8 +249,39 @@ internal sealed class DeviceSurface : Control
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
         }
 
+        else if (_touchMode == TouchDisplayMode.Knob && BackgroundImageValue is null && _secondaryKeys.All(image => image is null))
+        {
+            using var hintFont = new Font(Font.FontFamily, Math.Max(7f, 8.5f * scale), FontStyle.Regular, GraphicsUnit.Pixel);
+            for (var i = 0; i < _secondaryKeys.Length; i++)
+                TextRenderer.DrawText(graphics, $"Энкодер {i + 1}", hintFont, Rectangle.Round(TouchSegment(i)), Palette.MutedText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        }
+
         DrawChevron(graphics, _touchRect.Left - 22 * scale, _touchRect.Top + _touchRect.Height / 2, -1, scale);
         DrawChevron(graphics, _touchRect.Right + 22 * scale, _touchRect.Top + _touchRect.Height / 2, 1, scale);
+        DrawModeBadge(graphics, scale);
+    }
+
+    private void DrawModeBadge(Graphics graphics, float scale)
+    {
+        var rect = new RectangleF(
+            _touchRect.Right + 43 * scale,
+            _touchRect.Top + _touchRect.Height / 2 - 12 * scale,
+            92 * scale,
+            24 * scale);
+        using var fill = new SolidBrush(_touchMode == TouchDisplayMode.Knob
+            ? Color.FromArgb(36, 39, 46)
+            : Color.FromArgb(52, 43, 24));
+        using var edge = new Pen(_touchMode == TouchDisplayMode.Knob ? Palette.TouchEdge : Palette.Accent,
+            Math.Max(1, scale));
+        graphics.FillRoundedRectangle(fill, rect, 7 * scale);
+        graphics.DrawRoundedRectangle(edge, rect, 7 * scale);
+        using var font = new Font(Font.FontFamily, Math.Max(7f, 8f * scale), FontStyle.Bold, GraphicsUnit.Pixel);
+        TextRenderer.DrawText(graphics,
+            _touchMode == TouchDisplayMode.Knob ? "KNOB MODE" : "TOUCHBAR",
+            font, Rectangle.Round(rect),
+            _touchMode == TouchDisplayMode.Knob ? Palette.SecondaryText : Palette.Accent,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
 
     private static void DrawChevron(Graphics graphics, float centerX, float centerY, int direction, float scale)
@@ -281,7 +324,10 @@ internal sealed class DeviceSurface : Control
     private void DrawHint(Graphics graphics, RectangleF rect, float scale)
     {
         using var font = new Font(Font.FontFamily, Math.Max(7f, 8.5f * scale), FontStyle.Regular, GraphicsUnit.Pixel);
-        TextRenderer.DrawText(graphics, "Клик — нажатие  •  Колесо — вращение энкодера", font,
+        var hint = _touchMode == TouchDisplayMode.Knob
+            ? "Экран: клик — функция  •  свайп ↑ — Touchbar  •  энкодер: колесо — вращение"
+            : "Touchbar: касание — функция  •  свайп ↓ — Knob Mode  •  энкодер: колесо — вращение";
+        TextRenderer.DrawText(graphics, hint, font,
             Rectangle.Round(rect), Palette.MutedText,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
     }
@@ -311,7 +357,7 @@ internal sealed class DeviceSurface : Control
             if (_knobRects[i].Contains(e.Location))
             {
                 _activeKnob = i;
-                Emit(InputReportFactory.KnobPress(i, true), $"Энкодер {i + 1}: нажат");
+                Emit(InputReportFactory.KnobPress(i), $"Энкодер {i + 1}: нажат");
                 Invalidate();
                 return;
             }
@@ -319,8 +365,9 @@ internal sealed class DeviceSurface : Control
         {
             _touching = true;
             _touchStart = e.Location;
-            _activeSecondary = SegmentAt(e.Location);
-            EmitTouch(e.Location);
+            _activeSecondary = _touchMode == TouchDisplayMode.Knob ? SegmentAt(e.Location) : -1;
+            if (_touchMode == TouchDisplayMode.TouchBar)
+                EmitTouch(e.Location);
             Invalidate();
         }
     }
@@ -330,8 +377,8 @@ internal sealed class DeviceSurface : Control
         base.OnMouseMove(e);
         if (_touching)
         {
-            _activeSecondary = SegmentAt(e.Location);
-            EmitTouch(e.Location);
+            if (_touchMode == TouchDisplayMode.TouchBar)
+                EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
     }
@@ -340,6 +387,7 @@ internal sealed class DeviceSurface : Control
     {
         base.OnMouseLeave(e);
         _hoverKey = _hoverKnob = _hoverSecondary = -1;
+        _hoverTouch = false;
         Cursor = Cursors.Default;
         Invalidate();
     }
@@ -354,16 +402,26 @@ internal sealed class DeviceSurface : Control
         }
         if (_activeKnob >= 0)
         {
-            Emit(InputReportFactory.KnobPress(_activeKnob, false), $"Энкодер {_activeKnob + 1}: отпущен");
             _activeKnob = -1;
         }
         if (_touching)
         {
-            var delta = e.X - _touchStart.X;
-            if (Math.Abs(delta) > Math.Max(30, _touchRect.Width / 10))
-                Emit(InputReportFactory.Swipe(delta < 0), delta < 0 ? "Свайп влево" : "Свайп вправо");
-            else if (_activeSecondary >= 0)
-                Emit(InputReportFactory.Key(N4ProProfile.SecondaryKeyCodes[_activeSecondary], false), $"Touch-кнопка {_activeSecondary + 1}");
+            var deltaX = e.X - _touchStart.X;
+            var deltaY = e.Y - _touchStart.Y;
+            var verticalSwipe = Math.Abs(deltaY) > Math.Max(24, _touchRect.Height / 3) && Math.Abs(deltaY) > Math.Abs(deltaX);
+            var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
+            if (verticalSwipe)
+            {
+                SetTouchMode(deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Knob);
+            }
+            else if (horizontalSwipe)
+            {
+                Emit(InputReportFactory.Swipe(deltaX < 0), deltaX < 0 ? "Свайп влево" : "Свайп вправо");
+            }
+            else if (_touchMode == TouchDisplayMode.Knob && _activeSecondary >= 0)
+            {
+                Emit(InputReportFactory.SecondaryTap(_activeSecondary), $"Функция энкодера {_activeSecondary + 1}");
+            }
             _touching = false;
             _activeSecondary = -1;
         }
@@ -388,12 +446,26 @@ internal sealed class DeviceSurface : Control
         var oldKey = _hoverKey;
         var oldKnob = _hoverKnob;
         var oldSecondary = _hoverSecondary;
+        var oldTouch = _hoverTouch;
         _hoverKey = Array.FindIndex(_keyRects, rect => rect.Contains(location));
         _hoverKnob = Array.FindIndex(_knobRects, rect => rect.Contains(location));
-        _hoverSecondary = _touchRect.Contains(location) ? SegmentAt(location) : -1;
-        Cursor = _hoverKey >= 0 || _hoverKnob >= 0 || _hoverSecondary >= 0 ? Cursors.Hand : Cursors.Default;
-        if (oldKey != _hoverKey || oldKnob != _hoverKnob || oldSecondary != _hoverSecondary)
+        _hoverTouch = _touchRect.Contains(location);
+        _hoverSecondary = _hoverTouch && _touchMode == TouchDisplayMode.Knob ? SegmentAt(location) : -1;
+        Cursor = _hoverKey >= 0 || _hoverKnob >= 0 || _hoverTouch ? Cursors.Hand : Cursors.Default;
+        if (oldKey != _hoverKey || oldKnob != _hoverKnob || oldSecondary != _hoverSecondary || oldTouch != _hoverTouch)
             Invalidate();
+    }
+
+    private void SetTouchMode(TouchDisplayMode mode)
+    {
+        if (_touchMode == mode) return;
+        _touchMode = mode;
+        _activeSecondary = -1;
+        _hoverSecondary = -1;
+        StatusChanged?.Invoke(mode == TouchDisplayMode.Knob
+            ? "Knob Mode: экран связан с четырьмя энкодерами"
+            : "Touchbar Mode: экран принимает координатные касания");
+        Invalidate();
     }
 
     private int SegmentAt(Point location) =>
@@ -424,6 +496,12 @@ internal sealed class DeviceSurface : Control
         }
         base.Dispose(disposing);
     }
+}
+
+internal enum TouchDisplayMode
+{
+    Knob,
+    TouchBar,
 }
 
 internal static class Palette
