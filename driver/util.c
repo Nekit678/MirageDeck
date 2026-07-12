@@ -35,21 +35,3 @@ RequestGetHidXferPacketToRead(WDFREQUEST Request, HID_XFER_PACKET* Packet)
     Packet->reportBufferLen = (ULONG)outputLength;
     return STATUS_SUCCESS;
 }
-
-NTSTATUS
-RequestGetHidXferPacketToWrite(WDFREQUEST Request, HID_XFER_PACKET* Packet)
-{
-    WDFMEMORY inputMemory;
-    WDFMEMORY outputMemory;
-    size_t inputLength;
-    size_t outputLength;
-    NTSTATUS status = WdfRequestRetrieveOutputMemory(Request, &outputMemory);
-    if (!NT_SUCCESS(status)) return status;
-    WdfMemoryGetBuffer(outputMemory, &outputLength);
-    Packet->reportId = (UCHAR)outputLength;
-    status = WdfRequestRetrieveInputMemory(Request, &inputMemory);
-    if (!NT_SUCCESS(status)) return status;
-    Packet->reportBuffer = (PUCHAR)WdfMemoryGetBuffer(inputMemory, &inputLength);
-    Packet->reportBufferLen = (ULONG)inputLength;
-    return STATUS_SUCCESS;
-}

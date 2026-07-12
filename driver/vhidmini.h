@@ -32,4 +32,3 @@ WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, GetDeviceContext);
 
 NTSTATUS RequestCopyFromBuffer(WDFREQUEST Request, const VOID* Buffer, size_t Length);
 NTSTATUS RequestGetHidXferPacketToRead(WDFREQUEST Request, HID_XFER_PACKET* Packet);
-NTSTATUS RequestGetHidXferPacketToWrite(WDFREQUEST Request, HID_XFER_PACKET* Packet);

@@ -172,29 +172,24 @@ ReadReport(PDEVICE_CONTEXT Context, WDFREQUEST Request, BOOLEAN* Complete)
     return status;
 }
 
-static const UCHAR*
-OutputPayload(const HID_XFER_PACKET* Packet)
-{
-    if (Packet->reportBufferLen >= N4PRO_OUTPUT_REPORT_SIZE + 1 && Packet->reportBuffer[0] == 0)
-        return Packet->reportBuffer + 1;
-    return Packet->reportBuffer;
-}
-
 static NTSTATUS
 CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
     static const UCHAR sidePrefix[] = { 'M', 'B', 'V', 'E' };
-    HID_XFER_PACKET packet;
+    WDFMEMORY inputMemory;
+    const UCHAR* report;
     const UCHAR* payload;
+    size_t reportLength;
     ULONG tail;
-    NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
+    NTSTATUS status = WdfRequestRetrieveInputMemory(Request, &inputMemory);
     if (!NT_SUCCESS(status)) return status;
-    /* mshidumdf passes an unnumbered report as reportId=1 because the UMDF
-     * bridge stores the ID in an auxiliary output-buffer length. Accept both
-     * the logical zero and that one-byte bridge representation. */
-    if (packet.reportId > 1 || packet.reportBufferLen < N4PRO_OUTPUT_REPORT_SIZE)
+    report = (const UCHAR*)WdfMemoryGetBuffer(inputMemory, &reportLength);
+    if (reportLength < N4PRO_OUTPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
-    payload = OutputPayload(&packet);
+    if (reportLength >= N4PRO_HID_OUTPUT_REPORT_SIZE && report[0] == 0)
+        payload = report + 1;
+    else
+        payload = report;
 
     /* The panel injects input through a normal HID WriteFile report. This
      * avoids SET_FEATURE, which mshidumdf cannot marshal reliably for report
@@ -202,7 +197,7 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     if (RtlCompareMemory(payload, sidePrefix, sizeof(sidePrefix)) == sizeof(sidePrefix)
         && payload[4] == N4PRO_SIDE_INJECT_INPUT) {
         status = SubmitInput(Context, payload + 5);
-        WdfRequestSetInformation(Request, packet.reportBufferLen);
+        WdfRequestSetInformation(Request, reportLength);
         return status;
     }
 
@@ -219,7 +214,7 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     WdfWaitLockRelease(Context->RingLock);
     CompletePendingRead(Context);
 
-    WdfRequestSetInformation(Request, packet.reportBufferLen);
+    WdfRequestSetInformation(Request, reportLength);
     return STATUS_SUCCESS;
 }
 
