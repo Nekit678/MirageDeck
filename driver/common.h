@@ -2,7 +2,7 @@
 
 #define N4PRO_INPUT_REPORT_SIZE  512u
 #define N4PRO_OUTPUT_REPORT_SIZE 1024u
-#define N4PRO_SIDE_REPORT_ID     0x7Fu
+#define N4PRO_SIDE_REPORT_ID     0u
 #define N4PRO_SIDE_MAGIC         0x4556424Du /* "MBVE" as little endian */
 #define N4PRO_SIDE_INJECT_INPUT  1u
 #define N4PRO_SIDE_OUTPUT_PACKET 2u
@@ -11,7 +11,6 @@
 
 #include <pshpack1.h>
 typedef struct _N4PRO_SIDE_REPORT {
-    UCHAR ReportId;
     ULONG Magic;
     UCHAR Command;
     ULONG Sequence;
@@ -19,5 +18,4 @@ typedef struct _N4PRO_SIDE_REPORT {
 } N4PRO_SIDE_REPORT, *PN4PRO_SIDE_REPORT;
 #include <poppack.h>
 
-#define N4PRO_FEATURE_PAYLOAD_SIZE ((USHORT)(sizeof(N4PRO_SIDE_REPORT) - 1u))
-
+#define N4PRO_FEATURE_PAYLOAD_SIZE ((USHORT)sizeof(N4PRO_SIDE_REPORT))

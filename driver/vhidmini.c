@@ -25,13 +25,10 @@ static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0x09, 0x01,                         /* Usage for output main item */
     0x96, 0x00, 0x04,                   /* 1024-byte output report */
     0x91, 0x00,
-    0xA4,                               /* Push: do not number main reports */
-    0x85, N4PRO_SIDE_REPORT_ID,
     0x09, 0x01,                         /* Usage for feature main item */
     0x96, (N4PRO_FEATURE_PAYLOAD_SIZE & 0xFF),
           (N4PRO_FEATURE_PAYLOAD_SIZE >> 8),
     0xB1, 0x00,                         /* Side-channel feature report */
-    0xB4,
     0xC0
 };
 
@@ -330,7 +327,6 @@ GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
         return STATUS_INVALID_BUFFER_SIZE;
 
     RtlZeroMemory(&side, sizeof(side));
-    side.ReportId = N4PRO_SIDE_REPORT_ID;
     side.Magic = N4PRO_SIDE_MAGIC;
     side.Command = N4PRO_SIDE_NO_PACKET;
 
