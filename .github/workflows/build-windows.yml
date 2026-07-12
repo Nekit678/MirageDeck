@@ -1,0 +1,98 @@
+name: Build Windows package
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "driver/**"
+      - "scripts/**"
+      - "src/**"
+      - "test/**"
+      - "Directory.Build.props"
+      - "packages.config"
+  pull_request:
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "driver/**"
+      - "scripts/**"
+      - "src/**"
+      - "test/**"
+      - "Directory.Build.props"
+      - "packages.config"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-package-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test win-x64 package
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Restore WDK and Windows SDK build packages
+        shell: pwsh
+        run: nuget restore packages.config -PackagesDirectory packages
+
+      - name: Run protocol tests
+        shell: pwsh
+        run: dotnet run --project test/Mirabox.Emulator.Core.Tests/Mirabox.Emulator.Core.Tests.csproj -c Release
+
+      - name: Publish self-contained panel
+        shell: pwsh
+        run: >-
+          dotnet publish src/Mirabox.Emulator.Panel/Mirabox.Emulator.Panel.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -o artifacts/panel
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+
+      - name: Build UMDF driver
+        shell: pwsh
+        run: >-
+          msbuild driver/MiraboxN4Pro.vcxproj
+          /m
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:SignMode=Off
+          /p:Inf2CatUseLocalTime=true
+
+      - name: Test-sign and assemble distribution
+        shell: pwsh
+        env:
+          BUILD_COMMIT: ${{ github.sha }}
+          BUILD_RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          ./scripts/package-ci.ps1
+          -DriverSearchRoot ./driver
+          -PanelPublishDirectory ./artifacts/panel
+          -OutputDirectory ./artifacts/MiraboxHIDEmulator-win-x64
+
+      - name: Upload ready-to-install package
+        uses: actions/upload-artifact@v4
+        with:
+          name: MiraboxHIDEmulator-win-x64
+          path: artifacts/MiraboxHIDEmulator-win-x64
+          if-no-files-found: error
+          retention-days: 30

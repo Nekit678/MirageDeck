@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.vs/
+artifacts/
+packages/
+*.user
+*.suo
+*.pfx
+*.cer
+*.cat

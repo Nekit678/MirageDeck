@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Mirabox.Emulator.Core/Mirabox.Emulator.Core.csproj" />
+    <Project Path="src/Mirabox.Emulator.Panel/Mirabox.Emulator.Panel.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/Mirabox.Emulator.Core.Tests/Mirabox.Emulator.Core.Tests.csproj" />
+  </Folder>
+  <Folder Name="/driver/">
+    <Project Path="driver/MiraboxN4Pro.vcxproj" Type="{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}" />
+  </Folder>
+</Solution>
