@@ -14,20 +14,20 @@ static const WCHAR ProductString[] = L"HOTSPOTEKUSB HID DEMO";
 static const WCHAR SerialString[] = L"123456712345";
 static const UCHAR FirmwareVersion[] = "V4.N4 Pro E.02.009";
 
-/* {9A6C3D56-2683-4B22-9359-8FB4C38479B9} */
-static const GUID GUID_DEVINTERFACE_MIRABOX_EMULATOR = {
-    0x9a6c3d56, 0x2683, 0x4b22,
-    { 0x93, 0x59, 0x8f, 0xb4, 0xc3, 0x84, 0x79, 0xb9 }
-};
-
-/* Exact 36-byte report descriptor extracted from N4 Pro firmware 02.009. */
+/* The Input/Output portion is byte-for-byte identical to firmware 02.009.
+ * The final unnumbered Feature item is private panel transport. */
 static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0x06, 0xA0, 0xFF, 0x09, 0x01, 0xA1, 0x01, 0x09, 0x02,
     0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x96, 0x00,
     0x02, 0x81, 0x02, 0x09, 0x03, 0x15, 0x00, 0x26, 0xFF,
-    0x00, 0x75, 0x08, 0x96, 0x00, 0x04, 0x91, 0x02, 0xC0
+    0x00, 0x75, 0x08, 0x96, 0x00, 0x04, 0x91, 0x02,
+    0x09, 0x04,
+    0x96, (N4PRO_FEATURE_PAYLOAD_SIZE & 0xFF),
+          (N4PRO_FEATURE_PAYLOAD_SIZE >> 8),
+    0xB1, 0x02,
+    0xC0
 };
-C_ASSERT(sizeof(G_ReportDescriptor) == 36);
+C_ASSERT(sizeof(G_ReportDescriptor) == 43);
 
 static HID_DESCRIPTOR G_HidDescriptor = {
     0x09, 0x21, 0x0200, 0x00, 0x01,
@@ -37,13 +37,14 @@ static HID_DESCRIPTOR G_HidDescriptor = {
 static NTSTATUS CreateQueues(WDFDEVICE Device);
 static NTSTATUS ReadReport(PDEVICE_CONTEXT Context, WDFREQUEST Request, BOOLEAN* Complete);
 static NTSTATUS CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS InjectInput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS GetCapturedOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
+static NTSTATUS SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
+static NTSTATUS GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetInputReport(WDFREQUEST Request);
 static NTSTATUS GetString(WDFREQUEST Request);
 static VOID ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload);
 static VOID EnqueueInputLocked(PDEVICE_CONTEXT Context, const UCHAR* Report);
 static VOID CompletePendingRead(PDEVICE_CONTEXT Context);
+static NTSTATUS CopyInputReport(WDFREQUEST Request, const UCHAR* Payload);
 
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
@@ -61,7 +62,6 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     WDFDEVICE device;
     PDEVICE_CONTEXT context;
     NTSTATUS status;
-    DECLARE_CONST_UNICODE_STRING(panelReference, L"panel");
     UNREFERENCED_PARAMETER(Driver);
 
     WdfFdoInitSetFilter(DeviceInit);
@@ -82,11 +82,6 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     WDF_OBJECT_ATTRIBUTES_INIT(&lockAttributes);
     lockAttributes.ParentObject = device;
     status = WdfWaitLockCreate(&lockAttributes, &context->RingLock);
-    if (!NT_SUCCESS(status)) return status;
-    /* A reference string keeps the panel open separate from HIDClass' own
-     * default file object on this filtered device stack. */
-    status = WdfDeviceCreateDeviceInterface(
-        device, &GUID_DEVINTERFACE_MIRABOX_EMULATOR, &panelReference);
     if (!NT_SUCCESS(status)) return status;
     return CreateQueues(device);
 }
@@ -138,11 +133,11 @@ EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     case IOCTL_UMDF_HID_SET_OUTPUT_REPORT:
         status = CaptureOutput(context, Request);
         break;
-    case IOCTL_MIRABOX_INJECT_INPUT:
-        status = InjectInput(context, Request);
+    case IOCTL_UMDF_HID_SET_FEATURE:
+        status = SetFeature(context, Request);
         break;
-    case IOCTL_MIRABOX_GET_OUTPUT:
-        status = GetCapturedOutput(context, Request);
+    case IOCTL_UMDF_HID_GET_FEATURE:
+        status = GetFeature(context, Request);
         break;
     case IOCTL_UMDF_HID_GET_INPUT_REPORT:
         status = GetInputReport(Request);
@@ -163,16 +158,16 @@ EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
 static NTSTATUS
 ReadReport(PDEVICE_CONTEXT Context, WDFREQUEST Request, BOOLEAN* Complete)
 {
-    UCHAR report[N4PRO_INPUT_REPORT_SIZE];
+    UCHAR payload[N4PRO_INPUT_REPORT_SIZE];
     NTSTATUS status;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     if (Context->InputCount != 0) {
-        RtlCopyMemory(report, Context->InputRing[Context->InputHead], sizeof(report));
+        RtlCopyMemory(payload, Context->InputRing[Context->InputHead], sizeof(payload));
         Context->InputHead = (Context->InputHead + 1) % N4PRO_RING_CAPACITY;
         Context->InputCount--;
         WdfWaitLockRelease(Context->RingLock);
-        return RequestCopyFromBuffer(Request, report, sizeof(report));
+        return CopyInputReport(Request, payload);
     }
     status = WdfRequestForwardToIoQueue(Request, Context->ReadQueue);
     WdfWaitLockRelease(Context->RingLock);
@@ -217,32 +212,47 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     return STATUS_SUCCESS;
 }
 
-static NTSTATUS
-InjectInput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+static const UCHAR*
+FeaturePayload(const HID_XFER_PACKET* Packet)
 {
-    UCHAR* report;
-    size_t length;
+    if (Packet->reportBufferLen >= N4PRO_FEATURE_REPORT_SIZE && Packet->reportBuffer[0] == 0)
+        return Packet->reportBuffer + 1;
+    if (Packet->reportBufferLen >= N4PRO_FEATURE_PAYLOAD_SIZE)
+        return Packet->reportBuffer;
+    return NULL;
+}
+
+static NTSTATUS
+SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+{
+    HID_XFER_PACKET packet;
+    const UCHAR* payload;
+    PN4PRO_SIDE_REPORT side;
     WDFREQUEST readRequest = NULL;
-    NTSTATUS status = WdfRequestRetrieveInputBuffer(
-        Request, N4PRO_INPUT_REPORT_SIZE, (PVOID*)&report, &length);
+    NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
-    if (length != N4PRO_INPUT_REPORT_SIZE)
+    if (packet.reportId != N4PRO_SIDE_REPORT_ID)
         return STATUS_INVALID_BUFFER_SIZE;
+    payload = FeaturePayload(&packet);
+    if (payload == NULL) return STATUS_INVALID_BUFFER_SIZE;
+    side = (PN4PRO_SIDE_REPORT)payload;
+    if (side->Magic != N4PRO_SIDE_MAGIC || side->Command != N4PRO_SIDE_INJECT_INPUT)
+        return STATUS_INVALID_PARAMETER;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     status = WdfIoQueueRetrieveNextRequest(Context->ReadQueue, &readRequest);
     if (!NT_SUCCESS(status)) {
-        EnqueueInputLocked(Context, report);
+        EnqueueInputLocked(Context, side->Data);
     }
     WdfWaitLockRelease(Context->RingLock);
 
     if (readRequest != NULL) {
-        status = RequestCopyFromBuffer(readRequest, report, N4PRO_INPUT_REPORT_SIZE);
+        status = CopyInputReport(readRequest, side->Data);
         WdfRequestComplete(readRequest, status);
     } else {
         status = STATUS_SUCCESS;
     }
-    WdfRequestSetInformation(Request, N4PRO_INPUT_REPORT_SIZE);
+    WdfRequestSetInformation(Request, packet.reportBufferLen);
     return status;
 }
 
@@ -270,14 +280,14 @@ static VOID
 CompletePendingRead(PDEVICE_CONTEXT Context)
 {
     WDFREQUEST request = NULL;
-    UCHAR report[N4PRO_INPUT_REPORT_SIZE];
+    UCHAR payload[N4PRO_INPUT_REPORT_SIZE];
     NTSTATUS status;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     if (Context->InputCount != 0) {
         status = WdfIoQueueRetrieveNextRequest(Context->ReadQueue, &request);
         if (NT_SUCCESS(status)) {
-            RtlCopyMemory(report, Context->InputRing[Context->InputHead], sizeof(report));
+            RtlCopyMemory(payload, Context->InputRing[Context->InputHead], sizeof(payload));
             Context->InputHead = (Context->InputHead + 1) % N4PRO_RING_CAPACITY;
             Context->InputCount--;
         }
@@ -285,9 +295,18 @@ CompletePendingRead(PDEVICE_CONTEXT Context)
     WdfWaitLockRelease(Context->RingLock);
 
     if (request != NULL) {
-        status = RequestCopyFromBuffer(request, report, sizeof(report));
+        status = CopyInputReport(request, payload);
         WdfRequestComplete(request, status);
     }
+}
+
+static NTSTATUS
+CopyInputReport(WDFREQUEST Request, const UCHAR* Payload)
+{
+    UCHAR report[N4PRO_HID_INPUT_REPORT_SIZE];
+    report[0] = 0;
+    RtlCopyMemory(report + 1, Payload, N4PRO_INPUT_REPORT_SIZE);
+    return RequestCopyFromBuffer(Request, report, sizeof(report));
 }
 
 static VOID
@@ -318,39 +337,47 @@ ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload)
 }
 
 static NTSTATUS
-GetCapturedOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
-    UCHAR* output;
-    size_t length;
-    NTSTATUS status = WdfRequestRetrieveOutputBuffer(
-        Request, N4PRO_OUTPUT_REPORT_SIZE, (PVOID*)&output, &length);
+    HID_XFER_PACKET packet;
+    UCHAR report[N4PRO_FEATURE_REPORT_SIZE];
+    PN4PRO_SIDE_REPORT side = (PN4PRO_SIDE_REPORT)(report + 1);
+    NTSTATUS status = RequestGetHidXferPacketToRead(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
+    if (packet.reportId != N4PRO_SIDE_REPORT_ID
+        || packet.reportBufferLen < N4PRO_FEATURE_PAYLOAD_SIZE)
+        return STATUS_INVALID_BUFFER_SIZE;
+
+    RtlZeroMemory(report, sizeof(report));
+    side->Magic = N4PRO_SIDE_MAGIC;
+    side->Command = N4PRO_SIDE_NO_PACKET;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
+    side->Sequence = Context->OutputSequence;
     if (Context->OutputCount != 0) {
-        RtlCopyMemory(output, Context->OutputRing[Context->OutputHead], N4PRO_OUTPUT_REPORT_SIZE);
+        side->Command = N4PRO_SIDE_OUTPUT_PACKET;
+        RtlCopyMemory(side->Data, Context->OutputRing[Context->OutputHead], N4PRO_OUTPUT_REPORT_SIZE);
         Context->OutputHead = (Context->OutputHead + 1) % N4PRO_RING_CAPACITY;
         Context->OutputCount--;
-        WdfRequestSetInformation(Request, N4PRO_OUTPUT_REPORT_SIZE);
-    } else {
-        WdfRequestSetInformation(Request, 0);
     }
     WdfWaitLockRelease(Context->RingLock);
-    return STATUS_SUCCESS;
+    if (packet.reportBufferLen >= N4PRO_FEATURE_REPORT_SIZE)
+        return RequestCopyFromBuffer(Request, report, sizeof(report));
+    return RequestCopyFromBuffer(Request, side, sizeof(*side));
 }
 
 static NTSTATUS
 GetInputReport(WDFREQUEST Request)
 {
     HID_XFER_PACKET packet;
-    UCHAR report[N4PRO_INPUT_REPORT_SIZE];
+    UCHAR payload[N4PRO_INPUT_REPORT_SIZE];
     NTSTATUS status = RequestGetHidXferPacketToRead(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != 0 || packet.reportBufferLen < sizeof(report))
+    if (packet.reportId != 0 || packet.reportBufferLen < N4PRO_HID_INPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
-    RtlZeroMemory(report, sizeof(report));
-    RtlCopyMemory(report, FirmwareVersion, sizeof(FirmwareVersion));
-    return RequestCopyFromBuffer(Request, report, sizeof(report));
+    RtlZeroMemory(payload, sizeof(payload));
+    RtlCopyMemory(payload, FirmwareVersion, sizeof(FirmwareVersion));
+    return CopyInputReport(Request, payload);
 }
 
 static NTSTATUS

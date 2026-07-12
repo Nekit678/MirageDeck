@@ -14,32 +14,34 @@ internal sealed class HidDevice : IDisposable
     private const uint FileShareRead = 0x01;
     private const uint FileShareWrite = 0x02;
     private const uint OpenExisting = 3;
-    private const uint IoctlInjectInput = 0x00222000;
-    private const uint IoctlGetOutput = 0x00222004;
-    private static readonly Guid EmulatorInterfaceGuid = new("9A6C3D56-2683-4B22-9359-8FB4C38479B9");
+    private const int SidePayloadLength = 4 + 1 + 4 + N4ProProfile.OutputReportLength;
+    private const int MinimumFeatureReportLength = 1 + SidePayloadLength;
+    private const uint SideMagic = 0x4556424D;
 
     private readonly SafeFileHandle _handle;
+    private readonly int _featureReportLength;
 
-    private HidDevice(SafeFileHandle handle) => _handle = handle;
+    private HidDevice(SafeFileHandle handle, int featureReportLength)
+    {
+        _handle = handle;
+        _featureReportLength = featureReportLength;
+    }
 
     public static HidDevice OpenN4Pro()
     {
-        var interfaceGuid = EmulatorInterfaceGuid;
-        var set = SetupDiGetClassDevs(ref interfaceGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+        HidD_GetHidGuid(out var hidGuid);
+        var set = SetupDiGetClassDevs(ref hidGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
         if (set == new IntPtr(-1)) throw new Win32Exception();
-        var interfaceFound = false;
-        var openError = 0;
         try
         {
             for (uint index = 0; ; index++)
             {
                 var info = new SpDeviceInterfaceData { Size = Marshal.SizeOf<SpDeviceInterfaceData>() };
-                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref interfaceGuid, index, ref info))
+                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref hidGuid, index, ref info))
                 {
                     if (Marshal.GetLastWin32Error() == 259) break;
                     continue;
                 }
-                interfaceFound = true;
 
                 SetupDiGetDeviceInterfaceDetail(set, ref info, IntPtr.Zero, 0, out var required, IntPtr.Zero);
                 var detail = Marshal.AllocHGlobal((int)required);
@@ -51,48 +53,83 @@ internal sealed class HidDevice : IDisposable
                     if (path is null) continue;
                     var handle = CreateFile(path, GenericRead | GenericWrite, FileShareRead | FileShareWrite,
                         IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-                    if (handle.IsInvalid)
+                    if (handle.IsInvalid) { handle.Dispose(); continue; }
+                    var attributes = new HiddAttributes { Size = Marshal.SizeOf<HiddAttributes>() };
+                    if (HidD_GetAttributes(handle, ref attributes)
+                        && attributes.VendorId == N4ProProfile.VendorId
+                        && attributes.ProductId == N4ProProfile.ProductId)
                     {
-                        openError = Marshal.GetLastWin32Error();
-                        handle.Dispose();
-                        // Private IOCTLs use FILE_ANY_ACCESS, so a zero-access
-                        // handle is sufficient if HIDClass rejects GENERIC_*.
-                        handle = CreateFile(path, 0, FileShareRead | FileShareWrite,
-                            IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+                        var featureLength = GetFeatureReportLength(handle);
+                        if (featureLength < MinimumFeatureReportLength)
+                        {
+                            handle.Dispose();
+                            throw new IOException(
+                                $"Драйвер сообщил FeatureReportByteLength={featureLength}, ожидалось не менее {MinimumFeatureReportLength}.");
+                        }
+                        return new HidDevice(handle, featureLength);
                     }
-                    if (handle.IsInvalid)
-                    {
-                        openError = Marshal.GetLastWin32Error();
-                        handle.Dispose();
-                        continue;
-                    }
-                    return new HidDevice(handle);
+                    handle.Dispose();
                 }
                 finally { Marshal.FreeHGlobal(detail); }
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
-        if (!interfaceFound)
-            throw new IOException("Служебный интерфейс виртуальной панели не зарегистрирован драйвером.");
-        throw new Win32Exception(openError, "Служебный интерфейс найден, но Windows не разрешила открыть его");
+        throw new IOException("Виртуальный Mirabox N4 Pro Global (5548:1021) не найден.");
     }
 
     public void InjectInput(ReadOnlySpan<byte> report)
     {
-        if (report.Length != N4ProProfile.InputReportLength) throw new ArgumentException("Invalid input report", nameof(report));
-        var input = report.ToArray();
-        if (!DeviceIoControl(_handle, IoctlInjectInput, input, input.Length, null, 0, out _, IntPtr.Zero))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (report.Length != N4ProProfile.InputReportLength)
+            throw new ArgumentException("Invalid input report", nameof(report));
+        var feature = CreateSideReport(command: 1);
+        report.CopyTo(feature.AsSpan(10));
+        if (!HidD_SetFeature(_handle, feature, feature.Length))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"HidD_SetFeature завершился ошибкой (buffer={feature.Length})");
     }
 
     public bool TryReadOutput(out byte[] packet)
     {
-        packet = new byte[N4ProProfile.OutputReportLength];
-        if (!DeviceIoControl(_handle, IoctlGetOutput, null, 0, packet, packet.Length, out var received, IntPtr.Zero))
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (received == packet.Length) return true;
-        packet = [];
-        return false;
+        var feature = new byte[_featureReportLength];
+        feature[0] = 0;
+        if (!HidD_GetFeature(_handle, feature, feature.Length))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                $"HidD_GetFeature завершился ошибкой (buffer={feature.Length})");
+        if (BitConverter.ToUInt32(feature, 1) != SideMagic || feature[5] != 2)
+        {
+            packet = [];
+            return false;
+        }
+        packet = feature.AsSpan(10, N4ProProfile.OutputReportLength).ToArray();
+        return true;
+    }
+
+    private byte[] CreateSideReport(byte command)
+    {
+        var feature = new byte[_featureReportLength];
+        feature[0] = 0;
+        BitConverter.TryWriteBytes(feature.AsSpan(1, 4), SideMagic);
+        feature[5] = command;
+        return feature;
+    }
+
+    private static int GetFeatureReportLength(SafeFileHandle handle)
+    {
+        if (!HidD_GetPreparsedData(handle, out var preparsedData))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "HidD_GetPreparsedData завершился ошибкой");
+        var caps = Marshal.AllocHGlobal(64);
+        try
+        {
+            Marshal.Copy(new byte[64], 0, caps, 64);
+            var status = HidP_GetCaps(preparsedData, caps);
+            if (status < 0) throw new IOException($"HidP_GetCaps завершился с NTSTATUS 0x{status:X8}.");
+            return (ushort)Marshal.ReadInt16(caps, 8);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(caps);
+            HidD_FreePreparsedData(preparsedData);
+        }
     }
 
     public void Dispose() => _handle.Dispose();
@@ -106,11 +143,34 @@ internal sealed class HidDevice : IDisposable
         public IntPtr Reserved;
     }
 
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HiddAttributes
+    {
+        public int Size;
+        public ushort VendorId;
+        public ushort ProductId;
+        public ushort VersionNumber;
+    }
+
+    [DllImport("hid.dll")]
+    private static extern void HidD_GetHidGuid(out Guid guid);
+    [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode,
-        byte[]? input, int inputLength, byte[]? output, int outputLength,
-        out int bytesReturned, IntPtr overlapped);
+    private static extern bool HidD_GetAttributes(SafeFileHandle handle, ref HiddAttributes attributes);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr preparsedData);
+    [DllImport("hid.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_FreePreparsedData(IntPtr preparsedData);
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetCaps(IntPtr preparsedData, IntPtr capabilities);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);

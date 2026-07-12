@@ -2,11 +2,24 @@
 
 #define N4PRO_INPUT_REPORT_SIZE  512u
 #define N4PRO_OUTPUT_REPORT_SIZE 1024u
+#define N4PRO_HID_INPUT_REPORT_SIZE  (N4PRO_INPUT_REPORT_SIZE + 1u)
+#define N4PRO_HID_OUTPUT_REPORT_SIZE (N4PRO_OUTPUT_REPORT_SIZE + 1u)
 #define N4PRO_RING_CAPACITY      128u
 
-/* Private panel transport. It deliberately lives outside the HID report
- * descriptor, so applications see the exact descriptor of the real N4 Pro. */
-#define IOCTL_MIRABOX_INJECT_INPUT \
-    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x800, METHOD_BUFFERED, FILE_ANY_ACCESS)
-#define IOCTL_MIRABOX_GET_OUTPUT \
-    CTL_CODE(FILE_DEVICE_UNKNOWN, 0x801, METHOD_BUFFERED, FILE_ANY_ACCESS)
+#define N4PRO_SIDE_REPORT_ID     0u
+#define N4PRO_SIDE_MAGIC         0x4556424Du /* "MBVE" as little endian */
+#define N4PRO_SIDE_INJECT_INPUT  1u
+#define N4PRO_SIDE_OUTPUT_PACKET 2u
+#define N4PRO_SIDE_NO_PACKET     3u
+
+#include <pshpack1.h>
+typedef struct _N4PRO_SIDE_REPORT {
+    ULONG Magic;
+    UCHAR Command;
+    ULONG Sequence;
+    UCHAR Data[N4PRO_OUTPUT_REPORT_SIZE];
+} N4PRO_SIDE_REPORT, *PN4PRO_SIDE_REPORT;
+#include <poppack.h>
+
+#define N4PRO_FEATURE_PAYLOAD_SIZE ((USHORT)sizeof(N4PRO_SIDE_REPORT))
+#define N4PRO_FEATURE_REPORT_SIZE  (N4PRO_FEATURE_PAYLOAD_SIZE + 1u)
