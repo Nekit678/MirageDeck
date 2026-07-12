@@ -19,11 +19,13 @@ internal sealed class HidDevice : IDisposable
     private const uint SideMagic = 0x4556424D;
 
     private readonly SafeFileHandle _handle;
+    private readonly int _outputReportLength;
     private readonly int _featureReportLength;
 
-    private HidDevice(SafeFileHandle handle, int featureReportLength)
+    private HidDevice(SafeFileHandle handle, int outputReportLength, int featureReportLength)
     {
         _handle = handle;
+        _outputReportLength = outputReportLength;
         _featureReportLength = featureReportLength;
     }
 
@@ -59,14 +61,20 @@ internal sealed class HidDevice : IDisposable
                         && attributes.VendorId == N4ProProfile.VendorId
                         && attributes.ProductId == N4ProProfile.ProductId)
                     {
-                        var featureLength = GetFeatureReportLength(handle);
+                        var (outputLength, featureLength) = GetReportLengths(handle);
+                        if (outputLength < N4ProProfile.OutputReportLength + 1)
+                        {
+                            handle.Dispose();
+                            throw new IOException(
+                                $"Драйвер сообщил OutputReportByteLength={outputLength}, ожидалось не менее {N4ProProfile.OutputReportLength + 1}.");
+                        }
                         if (featureLength < MinimumFeatureReportLength)
                         {
                             handle.Dispose();
                             throw new IOException(
                                 $"Драйвер сообщил FeatureReportByteLength={featureLength}, ожидалось не менее {MinimumFeatureReportLength}.");
                         }
-                        return new HidDevice(handle, featureLength);
+                        return new HidDevice(handle, outputLength, featureLength);
                     }
                     handle.Dispose();
                 }
@@ -81,11 +89,19 @@ internal sealed class HidDevice : IDisposable
     {
         if (report.Length != N4ProProfile.InputReportLength)
             throw new ArgumentException("Invalid input report", nameof(report));
-        var feature = CreateSideReport(command: 1);
-        report.CopyTo(feature.AsSpan(10));
-        if (!HidD_SetFeature(_handle, feature, feature.Length))
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                $"HidD_SetFeature завершился ошибкой (buffer={feature.Length})");
+        var output = new byte[_outputReportLength];
+        output[0] = 0;
+        BitConverter.TryWriteBytes(output.AsSpan(1, 4), SideMagic);
+        output[5] = 1;
+        report.CopyTo(output.AsSpan(6));
+        if (!WriteFile(_handle, output, output.Length, out var written, IntPtr.Zero))
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error,
+                $"WriteFile завершился ошибкой {error} (buffer={output.Length})");
+        }
+        if (written != output.Length)
+            throw new IOException($"WriteFile записал {written} из {output.Length} байт.");
     }
 
     public bool TryReadOutput(out byte[] packet)
@@ -93,8 +109,11 @@ internal sealed class HidDevice : IDisposable
         var feature = new byte[_featureReportLength];
         feature[0] = 0;
         if (!HidD_GetFeature(_handle, feature, feature.Length))
-            throw new Win32Exception(Marshal.GetLastWin32Error(),
-                $"HidD_GetFeature завершился ошибкой (buffer={feature.Length})");
+        {
+            var error = Marshal.GetLastWin32Error();
+            throw new Win32Exception(error,
+                $"HidD_GetFeature завершился ошибкой {error} (buffer={feature.Length})");
+        }
         if (BitConverter.ToUInt32(feature, 1) != SideMagic || feature[5] != 2)
         {
             packet = [];
@@ -104,16 +123,7 @@ internal sealed class HidDevice : IDisposable
         return true;
     }
 
-    private byte[] CreateSideReport(byte command)
-    {
-        var feature = new byte[_featureReportLength];
-        feature[0] = 0;
-        BitConverter.TryWriteBytes(feature.AsSpan(1, 4), SideMagic);
-        feature[5] = command;
-        return feature;
-    }
-
-    private static int GetFeatureReportLength(SafeFileHandle handle)
+    private static (int Output, int Feature) GetReportLengths(SafeFileHandle handle)
     {
         if (!HidD_GetPreparsedData(handle, out var preparsedData))
             throw new Win32Exception(Marshal.GetLastWin32Error(), "HidD_GetPreparsedData завершился ошибкой");
@@ -123,7 +133,9 @@ internal sealed class HidDevice : IDisposable
             Marshal.Copy(new byte[64], 0, caps, 64);
             var status = HidP_GetCaps(preparsedData, caps);
             if (status < 0) throw new IOException($"HidP_GetCaps завершился с NTSTATUS 0x{status:X8}.");
-            return (ushort)Marshal.ReadInt16(caps, 8);
+            return (
+                (ushort)Marshal.ReadInt16(caps, 6),
+                (ushort)Marshal.ReadInt16(caps, 8));
         }
         finally
         {
@@ -167,10 +179,12 @@ internal sealed class HidDevice : IDisposable
     private static extern int HidP_GetCaps(IntPtr preparsedData, IntPtr capabilities);
     [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
-    [DllImport("hid.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool WriteFile(SafeFileHandle handle, byte[] buffer, int bytesToWrite,
+        out int bytesWritten, IntPtr overlapped);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);

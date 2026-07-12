@@ -37,7 +37,6 @@ static HID_DESCRIPTOR G_HidDescriptor = {
 static NTSTATUS CreateQueues(WDFDEVICE Device);
 static NTSTATUS ReadReport(PDEVICE_CONTEXT Context, WDFREQUEST Request, BOOLEAN* Complete);
 static NTSTATUS CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetInputReport(WDFREQUEST Request);
 static NTSTATUS GetString(WDFREQUEST Request);
@@ -45,6 +44,7 @@ static VOID ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload)
 static VOID EnqueueInputLocked(PDEVICE_CONTEXT Context, const UCHAR* Report);
 static VOID CompletePendingRead(PDEVICE_CONTEXT Context);
 static NTSTATUS CopyInputReport(WDFREQUEST Request, const UCHAR* Payload);
+static NTSTATUS SubmitInput(PDEVICE_CONTEXT Context, const UCHAR* Payload);
 
 NTSTATUS
 DriverEntry(PDRIVER_OBJECT DriverObject, PUNICODE_STRING RegistryPath)
@@ -133,9 +133,6 @@ EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     case IOCTL_UMDF_HID_SET_OUTPUT_REPORT:
         status = CaptureOutput(context, Request);
         break;
-    case IOCTL_UMDF_HID_SET_FEATURE:
-        status = SetFeature(context, Request);
-        break;
     case IOCTL_UMDF_HID_GET_FEATURE:
         status = GetFeature(context, Request);
         break;
@@ -186,6 +183,7 @@ OutputPayload(const HID_XFER_PACKET* Packet)
 static NTSTATUS
 CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
+    static const UCHAR sidePrefix[] = { 'M', 'B', 'V', 'E' };
     HID_XFER_PACKET packet;
     const UCHAR* payload;
     ULONG tail;
@@ -194,6 +192,16 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     if (packet.reportId != 0 || packet.reportBufferLen < N4PRO_OUTPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
     payload = OutputPayload(&packet);
+
+    /* The panel injects input through a normal HID WriteFile report. This
+     * avoids SET_FEATURE, which mshidumdf cannot marshal reliably for report
+     * ID zero. The MBVE prefix cannot collide with Stream Dock's CRT protocol. */
+    if (RtlCompareMemory(payload, sidePrefix, sizeof(sidePrefix)) == sizeof(sidePrefix)
+        && payload[4] == N4PRO_SIDE_INJECT_INPUT) {
+        status = SubmitInput(Context, payload + 5);
+        WdfRequestSetInformation(Request, packet.reportBufferLen);
+        return status;
+    }
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     if (Context->OutputCount == N4PRO_RING_CAPACITY) {
@@ -212,47 +220,25 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     return STATUS_SUCCESS;
 }
 
-static const UCHAR*
-FeaturePayload(const HID_XFER_PACKET* Packet)
-{
-    if (Packet->reportBufferLen >= N4PRO_FEATURE_REPORT_SIZE && Packet->reportBuffer[0] == 0)
-        return Packet->reportBuffer + 1;
-    if (Packet->reportBufferLen >= N4PRO_FEATURE_PAYLOAD_SIZE)
-        return Packet->reportBuffer;
-    return NULL;
-}
-
 static NTSTATUS
-SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+SubmitInput(PDEVICE_CONTEXT Context, const UCHAR* Payload)
 {
-    HID_XFER_PACKET packet;
-    const UCHAR* payload;
-    PN4PRO_SIDE_REPORT side;
     WDFREQUEST readRequest = NULL;
-    NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
-    if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != N4PRO_SIDE_REPORT_ID)
-        return STATUS_INVALID_BUFFER_SIZE;
-    payload = FeaturePayload(&packet);
-    if (payload == NULL) return STATUS_INVALID_BUFFER_SIZE;
-    side = (PN4PRO_SIDE_REPORT)payload;
-    if (side->Magic != N4PRO_SIDE_MAGIC || side->Command != N4PRO_SIDE_INJECT_INPUT)
-        return STATUS_INVALID_PARAMETER;
+    NTSTATUS status;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     status = WdfIoQueueRetrieveNextRequest(Context->ReadQueue, &readRequest);
     if (!NT_SUCCESS(status)) {
-        EnqueueInputLocked(Context, side->Data);
+        EnqueueInputLocked(Context, Payload);
     }
     WdfWaitLockRelease(Context->RingLock);
 
     if (readRequest != NULL) {
-        status = CopyInputReport(readRequest, side->Data);
+        status = CopyInputReport(readRequest, Payload);
         WdfRequestComplete(readRequest, status);
     } else {
         status = STATUS_SUCCESS;
     }
-    WdfRequestSetInformation(Request, packet.reportBufferLen);
     return status;
 }
 
