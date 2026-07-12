@@ -7,11 +7,12 @@
 
 #define N4PRO_VID     0x5548
 #define N4PRO_PID     0x1008
-#define N4PRO_VERSION 0x0100
+#define N4PRO_VERSION 0x0002
 
-static const WCHAR ManufacturerString[] = L"HOTSPOT";
-static const WCHAR ProductString[] = L"HOTSPOT USB HID";
-static const WCHAR SerialString[] = L"N4PRO-VIRTUAL-0001";
+static const WCHAR ManufacturerString[] = L"HOTSPOTEKUSB";
+static const WCHAR ProductString[] = L"HOTSPOTEKUSB HID DEMO";
+static const WCHAR SerialString[] = L"123456712345";
+static const UCHAR FirmwareVersion[] = "V4.N4 Pro E.02.009";
 
 static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0x06, 0xA0, 0xFF,                   /* Usage Page 0xFFA0 */
@@ -33,7 +34,7 @@ static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
 };
 
 static HID_DESCRIPTOR G_HidDescriptor = {
-    0x09, 0x21, 0x0111, 0x00, 0x01,
+    0x09, 0x21, 0x0200, 0x00, 0x01,
     { { 0x22, sizeof(G_ReportDescriptor) } }
 };
 
@@ -352,7 +353,7 @@ GetInputReport(WDFREQUEST Request)
     if (packet.reportId != 0 || packet.reportBufferLen < sizeof(report))
         return STATUS_INVALID_BUFFER_SIZE;
     RtlZeroMemory(report, sizeof(report));
-    RtlCopyMemory(report, "V1.0.0", sizeof("V1.0.0"));
+    RtlCopyMemory(report, FirmwareVersion, sizeof(FirmwareVersion));
     return RequestCopyFromBuffer(Request, report, sizeof(report));
 }
 

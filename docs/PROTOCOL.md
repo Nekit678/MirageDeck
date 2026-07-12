@@ -6,8 +6,9 @@
 | --- | --- |
 | VID / PID | `5548:1008` |
 | Usage page / usage | `FFA0:0001` |
-| Manufacturer | `HOTSPOT` |
-| Product | `HOTSPOT USB HID` |
+| Manufacturer | `HOTSPOTEKUSB` |
+| Product | `HOTSPOTEKUSB HID DEMO` |
+| Firmware response | `V4.N4 Pro E.02.009` |
 | Input payload | 512 байт |
 | Output payload | 1024 байта |
 
