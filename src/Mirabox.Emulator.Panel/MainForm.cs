@@ -7,7 +7,7 @@ namespace Mirabox.Emulator.Panel;
 internal sealed class MainForm : Form
 {
     private readonly DeviceSurface _surface = new() { Dock = DockStyle.Fill };
-    private readonly ToolStripStatusLabel _status = new("Подключение…");
+    private readonly StatusBanner _status = new() { Dock = DockStyle.Bottom, Height = 64 };
     private readonly MiraboxProtocolDecoder _decoder = new();
     private readonly CancellationTokenSource _shutdown = new();
     private HidDevice? _device;
@@ -16,13 +16,13 @@ internal sealed class MainForm : Form
     {
         Text = "Mirabox N4 Pro — виртуальная панель";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 620);
-        ClientSize = new Size(930, 680);
-        BackColor = Color.FromArgb(22, 23, 27);
-        var statusStrip = new StatusStrip { SizingGrip = false };
-        statusStrip.Items.Add(_status);
+        MinimumSize = new Size(740, 530);
+        ClientSize = new Size(900, 600);
+        BackColor = Palette.Window;
+        AutoScaleMode = AutoScaleMode.Dpi;
         Controls.Add(_surface);
-        Controls.Add(statusStrip);
+        Controls.Add(_status);
+        _status.SetStatus("Инициализация виртуального HID-устройства…", StatusKind.Connecting);
         _surface.InputGenerated += Inject;
         Shown += (_, _) => Connect();
         FormClosed += (_, _) => _shutdown.Cancel();
@@ -33,12 +33,12 @@ internal sealed class MainForm : Form
         try
         {
             _device = HidDevice.OpenN4Pro();
-            _status.Text = "Подключено: HID 5548:1021 (Global)";
+            SetStatus("HID 5548:1021 (Global) готов к работе", StatusKind.Success);
             _ = Task.Run(() => PollAsync(_shutdown.Token));
         }
         catch (Exception error)
         {
-            _status.Text = error.Message;
+            SetStatus(error.Message, StatusKind.Error);
             MessageBox.Show(this, error.Message, "Mirabox HID Emulator", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
@@ -48,9 +48,9 @@ internal sealed class MainForm : Form
         try
         {
             _device?.InjectInput(report);
-            _status.Text = description;
+            SetStatus(description, StatusKind.Activity);
         }
-        catch (Exception error) { _status.Text = error.Message; }
+        catch (Exception error) { SetStatus(error.Message, StatusKind.Error); }
     }
 
     private async Task PollAsync(CancellationToken cancellationToken)
@@ -72,7 +72,7 @@ internal sealed class MainForm : Form
         catch (OperationCanceledException) { }
         catch (Exception error)
         {
-            if (!IsDisposed) BeginInvoke(() => _status.Text = $"Ошибка HID: {error.Message}");
+            if (!IsDisposed) BeginInvoke(() => SetStatus($"Ошибка HID: {error.Message}", StatusKind.Error));
         }
     }
 
@@ -85,7 +85,7 @@ internal sealed class MainForm : Form
             if (index >= 0)
             {
                 _surface.SetKeyImage(index, DecodeImage(image.EncodedImage));
-                _status.Text = $"Изображение кнопки {index + 1}: {image.EncodedImage.Length:N0} байт";
+                SetStatus($"Изображение кнопки {index + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
             }
             else
             {
@@ -93,18 +93,18 @@ internal sealed class MainForm : Form
                 if (secondary >= 0)
                 {
                     _surface.SetSecondaryImage(secondary, DecodeImage(image.EncodedImage));
-                    _status.Text = $"Изображение touch-кнопки {secondary + 1}: {image.EncodedImage.Length:N0} байт";
+                    SetStatus($"Изображение touch-кнопки {secondary + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
                 }
             }
             break;
         case BackgroundUpdate background:
             _surface.SetBackground(DecodeImage(background.EncodedImage));
-            _status.Text = $"Фон: {background.EncodedImage.Length:N0} байт";
+            SetStatus($"Фон обновлён: {background.EncodedImage.Length:N0} байт", StatusKind.Activity);
             break;
         case BrightnessUpdate brightness:
             _surface.Brightness = brightness.Value;
             _surface.Invalidate();
-            _status.Text = $"Яркость: {brightness.Value}";
+            SetStatus($"Яркость экрана: {brightness.Value}%", StatusKind.Activity);
             break;
         case ClearKeyUpdate clear:
             var main = N4ProProfile.UiKeyForImageSlot(clear.Slot);
@@ -115,10 +115,12 @@ internal sealed class MainForm : Form
             _surface.ClearAll();
             break;
         case WakeUpdate:
-            _status.Text = "Экран включён";
+            SetStatus("Экран включён", StatusKind.Success);
             break;
         }
     }
+
+    private void SetStatus(string message, StatusKind kind) => _status.SetStatus(message, kind);
 
     private static Image DecodeImage(byte[] bytes)
     {
@@ -171,6 +173,106 @@ internal sealed class MainForm : Form
             _device?.Dispose();
             _shutdown.Dispose();
         }
+        base.Dispose(disposing);
+    }
+}
+
+internal enum StatusKind
+{
+    Connecting,
+    Success,
+    Activity,
+    Error,
+}
+
+internal sealed class StatusBanner : Control
+{
+    private readonly ToolTip _toolTip = new() { InitialDelay = 350, ReshowDelay = 100 };
+    private string _message = string.Empty;
+    private StatusKind _kind;
+
+    public StatusBanner()
+    {
+        DoubleBuffered = true;
+        BackColor = Palette.Window;
+        ForeColor = Palette.PrimaryText;
+        SetStyle(ControlStyles.ResizeRedraw, true);
+        AccessibleRole = AccessibleRole.StatusBar;
+    }
+
+    public void SetStatus(string message, StatusKind kind)
+    {
+        _message = string.IsNullOrWhiteSpace(message) ? "Нет дополнительных сведений" : message.Trim();
+        _kind = kind;
+        AccessibleName = $"{Title(kind)}: {_message}";
+        _toolTip.SetToolTip(this, _message);
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        using (var separator = new Pen(Color.FromArgb(44, 46, 53)))
+            e.Graphics.DrawLine(separator, 0, 0, ClientSize.Width, 0);
+
+        var banner = new RectangleF(14, 9, Math.Max(0, ClientSize.Width - 28), Math.Max(0, ClientSize.Height - 18));
+        var colors = Colors(_kind);
+        using (var fill = new SolidBrush(colors.Background))
+            e.Graphics.FillRoundedRectangle(fill, banner, 10);
+        using (var border = new Pen(colors.Border))
+            e.Graphics.DrawRoundedRectangle(border, banner, 10);
+
+        var centerY = banner.Top + banner.Height / 2;
+        using (var glow = new SolidBrush(Color.FromArgb(35, colors.Highlight)))
+            e.Graphics.FillEllipse(glow, banner.Left + 13, centerY - 9, 18, 18);
+        using (var dot = new SolidBrush(colors.Highlight))
+            e.Graphics.FillEllipse(dot, banner.Left + 19, centerY - 3, 6, 6);
+
+        using var titleFont = new Font(Font.FontFamily, 8.5f, FontStyle.Bold);
+        using var messageFont = new Font(Font.FontFamily, 9.5f, FontStyle.Regular);
+        var titleRect = new Rectangle(
+            (int)banner.Left + 43,
+            (int)banner.Top + 5,
+            Math.Min(115, Math.Max(0, (int)banner.Width - 55)),
+            16);
+        var messageRect = new Rectangle(
+            titleRect.Left,
+            titleRect.Bottom - 1,
+            Math.Max(0, (int)banner.Right - titleRect.Left - 12),
+            20);
+        TextRenderer.DrawText(e.Graphics, Title(_kind).ToUpperInvariant(), titleFont, titleRect, colors.Highlight,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix);
+        TextRenderer.DrawText(e.Graphics, _message, messageFont, messageRect, Palette.PrimaryText,
+            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis |
+            TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+    }
+
+    private static string Title(StatusKind kind) => kind switch
+    {
+        StatusKind.Connecting => "Подключение",
+        StatusKind.Success => "Готово",
+        StatusKind.Activity => "Событие",
+        StatusKind.Error => "Ошибка",
+        _ => "Статус",
+    };
+
+    private static (Color Background, Color Border, Color Highlight) Colors(StatusKind kind) => kind switch
+    {
+        StatusKind.Connecting =>
+            (Color.FromArgb(28, 36, 49), Color.FromArgb(51, 76, 108), Color.FromArgb(103, 165, 238)),
+        StatusKind.Success =>
+            (Color.FromArgb(25, 42, 34), Color.FromArgb(48, 91, 68), Color.FromArgb(80, 200, 120)),
+        StatusKind.Error =>
+            (Color.FromArgb(55, 29, 34), Color.FromArgb(128, 54, 64), Color.FromArgb(255, 105, 118)),
+        _ =>
+            (Color.FromArgb(31, 33, 39), Color.FromArgb(58, 61, 69), Palette.Accent),
+    };
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _toolTip.Dispose();
         base.Dispose(disposing);
     }
 }
