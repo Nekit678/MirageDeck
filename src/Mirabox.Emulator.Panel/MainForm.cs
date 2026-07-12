@@ -33,7 +33,7 @@ internal sealed class MainForm : Form
         try
         {
             _device = HidDevice.OpenN4Pro();
-            _status.Text = "Подключено: HID 5548:1008";
+            _status.Text = "Подключено: HID 5548:1021 (Global)";
             _ = Task.Run(() => PollAsync(_shutdown.Token));
         }
         catch (Exception error)

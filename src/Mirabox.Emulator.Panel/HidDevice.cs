@@ -27,6 +27,8 @@ internal sealed class HidDevice : IDisposable
         var interfaceGuid = EmulatorInterfaceGuid;
         var set = SetupDiGetClassDevs(ref interfaceGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
         if (set == new IntPtr(-1)) throw new Win32Exception();
+        var interfaceFound = false;
+        var openError = 0;
         try
         {
             for (uint index = 0; ; index++)
@@ -37,6 +39,7 @@ internal sealed class HidDevice : IDisposable
                     if (Marshal.GetLastWin32Error() == 259) break;
                     continue;
                 }
+                interfaceFound = true;
 
                 SetupDiGetDeviceInterfaceDetail(set, ref info, IntPtr.Zero, 0, out var required, IntPtr.Zero);
                 var detail = Marshal.AllocHGlobal((int)required);
@@ -48,14 +51,30 @@ internal sealed class HidDevice : IDisposable
                     if (path is null) continue;
                     var handle = CreateFile(path, GenericRead | GenericWrite, FileShareRead | FileShareWrite,
                         IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-                    if (handle.IsInvalid) { handle.Dispose(); continue; }
+                    if (handle.IsInvalid)
+                    {
+                        openError = Marshal.GetLastWin32Error();
+                        handle.Dispose();
+                        // Private IOCTLs use FILE_ANY_ACCESS, so a zero-access
+                        // handle is sufficient if HIDClass rejects GENERIC_*.
+                        handle = CreateFile(path, 0, FileShareRead | FileShareWrite,
+                            IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
+                    }
+                    if (handle.IsInvalid)
+                    {
+                        openError = Marshal.GetLastWin32Error();
+                        handle.Dispose();
+                        continue;
+                    }
                     return new HidDevice(handle);
                 }
                 finally { Marshal.FreeHGlobal(detail); }
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
-        throw new IOException("Виртуальный Mirabox N4 Pro не найден. Установите и запустите драйвер.");
+        if (!interfaceFound)
+            throw new IOException("Служебный интерфейс виртуальной панели не зарегистрирован драйвером.");
+        throw new Win32Exception(openError, "Служебный интерфейс найден, но Windows не разрешила открыть его");
     }
 
     public void InjectInput(ReadOnlySpan<byte> report)

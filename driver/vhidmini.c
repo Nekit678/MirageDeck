@@ -6,7 +6,7 @@
 #include "vhidmini.h"
 
 #define N4PRO_VID     0x5548
-#define N4PRO_PID     0x1008
+#define N4PRO_PID     0x1021
 #define N4PRO_VERSION 0x0002
 
 static const WCHAR ManufacturerString[] = L"HOTSPOTEKUSB";
@@ -61,6 +61,7 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     WDFDEVICE device;
     PDEVICE_CONTEXT context;
     NTSTATUS status;
+    DECLARE_CONST_UNICODE_STRING(panelReference, L"panel");
     UNREFERENCED_PARAMETER(Driver);
 
     WdfFdoInitSetFilter(DeviceInit);
@@ -82,7 +83,10 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     lockAttributes.ParentObject = device;
     status = WdfWaitLockCreate(&lockAttributes, &context->RingLock);
     if (!NT_SUCCESS(status)) return status;
-    status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_MIRABOX_EMULATOR, NULL);
+    /* A reference string keeps the panel open separate from HIDClass' own
+     * default file object on this filtered device stack. */
+    status = WdfDeviceCreateDeviceInterface(
+        device, &GUID_DEVINTERFACE_MIRABOX_EMULATOR, &panelReference);
     if (!NT_SUCCESS(status)) return status;
     return CreateQueues(device);
 }

@@ -4,7 +4,7 @@
 
 | Поле | Значение |
 | --- | --- |
-| VID / PID | `5548:1008` |
+| VID / PID | `5548:1021` (N4ProE, Global) |
 | Usage page / usage | `FFA0:0001` |
 | Manufacturer | `HOTSPOTEKUSB` |
 | Product | `HOTSPOTEKUSB HID DEMO` |
