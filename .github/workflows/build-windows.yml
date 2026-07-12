@@ -51,6 +51,17 @@ jobs:
         shell: pwsh
         run: nuget restore packages.config -PackagesDirectory packages
 
+      - name: Add WDK NuGet tools to PATH
+        shell: pwsh
+        run: |
+          $stampInf = Get-ChildItem packages -Filter stampinf.exe -File -Recurse |
+            Where-Object FullName -Match '\\x64\\stampinf\.exe$' |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $stampInf) { throw "stampinf.exe was not found in the restored WDK package" }
+          $stampInf.Directory.FullName | Out-File $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "WDK tools: $($stampInf.Directory.FullName)"
+
       - name: Run protocol tests
         shell: pwsh
         run: dotnet run --project test/Mirabox.Emulator.Core.Tests/Mirabox.Emulator.Core.Tests.csproj -c Release
