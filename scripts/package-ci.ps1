@@ -16,18 +16,23 @@ function Invoke-Native {
 
 function Find-WdkTool {
   param([Parameter(Mandatory)][string]$Name)
-  $roots = @(
-    "${env:ProgramFiles(x86)}\Windows Kits\10\bin",
-    "${env:ProgramFiles(x86)}\Windows Kits\11\bin",
-    (Join-Path (Get-Location) "packages")
-  ) | Where-Object { Test-Path $_ }
-  $matches = foreach ($root in $roots) {
-    Get-ChildItem $root -Filter $Name -File -Recurse -ErrorAction SilentlyContinue
+  $patterns = if ($Name -ieq "inf2cat.exe") {
+    @(
+      "packages\Microsoft.Windows.WDK.x64.*\c\bin\*\x86\Inf2Cat.exe",
+      "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x86\Inf2Cat.exe",
+      "${env:ProgramFiles(x86)}\Windows Kits\11\bin\*\x86\Inf2Cat.exe"
+    )
+  } else {
+    @(
+      "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\$Name",
+      "${env:ProgramFiles(x86)}\Windows Kits\11\bin\*\x64\$Name"
+    )
   }
-  $preferred = $matches | Where-Object FullName -Match '\\x64\\' | Sort-Object FullName -Descending | Select-Object -First 1
-  if (-not $preferred) { $preferred = $matches | Sort-Object FullName -Descending | Select-Object -First 1 }
-  if (-not $preferred) { throw "$Name was not found in the installed WDK" }
-  return $preferred.FullName
+  $match = Get-Item $patterns -ErrorAction SilentlyContinue |
+    Sort-Object FullName -Descending |
+    Select-Object -First 1
+  if (-not $match) { throw "$Name was not found in the installed WDK" }
+  return $match.FullName
 }
 
 if (-not $IsWindows) { throw "Driver packaging must run on Windows" }
