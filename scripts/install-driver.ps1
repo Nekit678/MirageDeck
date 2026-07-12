@@ -17,10 +17,9 @@ if (-not $DriverDirectory) {
 }
 $inf = Get-ChildItem $DriverDirectory -Filter MiraboxN4Pro.inf -Recurse | Select-Object -First 1
 if (-not $inf) { throw "MiraboxN4Pro.inf was not found under $DriverDirectory" }
-if (Get-PnpDevice -PresentOnly | Where-Object InstanceId -Like "ROOT\MIRABOXN4PRO*") {
-  Write-Host "The virtual Mirabox device is already installed."
-  exit 0
-}
+$existingDevice = Get-PnpDevice -PresentOnly:$false |
+  Where-Object InstanceId -Like "ROOT\MIRABOXN4PRO*" |
+  Select-Object -First 1
 
 $certificate = Get-ChildItem $DriverDirectory -Filter *.cer -Recurse | Select-Object -First 1
 if ($certificate) {
@@ -36,11 +35,20 @@ if (-not ([System.Management.Automation.PSTypeName]'Mirabox.Emulator.Install.Roo
   Add-Type -Path $helperPath
 }
 
-Write-Host "Creating the persistent ROOT\MiraboxN4Pro device..."
-$rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
-  $inf.FullName,
-  "Root\MiraboxN4Pro"
-)
+if ($existingDevice) {
+  Write-Host "Updating driver for $($existingDevice.InstanceId)..."
+  $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Update(
+    $inf.FullName,
+    "Root\MiraboxN4Pro"
+  )
+  Invoke-Native -FilePath "pnputil.exe" -Arguments @("/restart-device", $existingDevice.InstanceId)
+} else {
+  Write-Host "Creating the persistent ROOT\MiraboxN4Pro device..."
+  $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
+    $inf.FullName,
+    "Root\MiraboxN4Pro"
+  )
+}
 Invoke-Native -FilePath "pnputil.exe" -Arguments @("/scan-devices")
 
 if ($rebootRequired) {

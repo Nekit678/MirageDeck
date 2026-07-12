@@ -19,12 +19,15 @@ static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0xA1, 0x01,                         /* Application collection */
     0x15, 0x00, 0x26, 0xFF, 0x00,
     0x75, 0x08,
+    0x09, 0x01,                         /* Usage for input main item */
     0x96, 0x00, 0x02,                   /* 512-byte input report */
     0x81, 0x00,
+    0x09, 0x01,                         /* Usage for output main item */
     0x96, 0x00, 0x04,                   /* 1024-byte output report */
     0x91, 0x00,
     0xA4,                               /* Push: do not number main reports */
     0x85, N4PRO_SIDE_REPORT_ID,
+    0x09, 0x01,                         /* Usage for feature main item */
     0x96, (N4PRO_FEATURE_PAYLOAD_SIZE & 0xFF),
           (N4PRO_FEATURE_PAYLOAD_SIZE >> 8),
     0xB1, 0x00,                         /* Side-channel feature report */

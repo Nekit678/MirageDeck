@@ -79,11 +79,7 @@ namespace Mirabox.Emulator.Install
 
         public static bool Install(string infPath, string hardwareId)
         {
-            infPath = Path.GetFullPath(infPath);
-            if (!File.Exists(infPath))
-            {
-                throw new FileNotFoundException("The driver INF was not found.", infPath);
-            }
+            infPath = ValidateInfPath(infPath);
 
             Guid classGuid;
             uint requiredSize;
@@ -132,21 +128,43 @@ namespace Mirabox.Emulator.Install
                 }
 
                 bool rebootRequired;
-                if (!UpdateDriverForPlugAndPlayDevices(
-                    IntPtr.Zero,
-                    hardwareId,
-                    infPath,
-                    INSTALLFLAG_FORCE,
-                    out rebootRequired))
-                {
-                    ThrowLastError("UpdateDriverForPlugAndPlayDevices");
-                }
+                rebootRequired = UpdateExistingDevice(infPath, hardwareId);
                 return rebootRequired;
             }
             finally
             {
                 SetupDiDestroyDeviceInfoList(deviceInfoSet);
             }
+        }
+
+        public static bool Update(string infPath, string hardwareId)
+        {
+            return UpdateExistingDevice(ValidateInfPath(infPath), hardwareId);
+        }
+
+        private static string ValidateInfPath(string infPath)
+        {
+            infPath = Path.GetFullPath(infPath);
+            if (!File.Exists(infPath))
+            {
+                throw new FileNotFoundException("The driver INF was not found.", infPath);
+            }
+            return infPath;
+        }
+
+        private static bool UpdateExistingDevice(string infPath, string hardwareId)
+        {
+            bool rebootRequired;
+            if (!UpdateDriverForPlugAndPlayDevices(
+                IntPtr.Zero,
+                hardwareId,
+                infPath,
+                INSTALLFLAG_FORCE,
+                out rebootRequired))
+            {
+                ThrowLastError("UpdateDriverForPlugAndPlayDevices");
+            }
+            return rebootRequired;
         }
 
         private static void ThrowLastError(string operation)
