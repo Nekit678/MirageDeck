@@ -17,8 +17,8 @@ if (Get-PnpDevice -PresentOnly | Where-Object InstanceId -Like "ROOT\MIRABOXN4PR
 
 $certificate = Get-ChildItem $DriverDirectory -Filter *.cer -Recurse | Select-Object -First 1
 if ($certificate) {
-  & certutil.exe -addstore Root $certificate.FullName
-  & certutil.exe -addstore TrustedPublisher $certificate.FullName
+  & certutil.exe -f -addstore Root $certificate.FullName
+  & certutil.exe -f -addstore TrustedPublisher $certificate.FullName
 }
 & pnputil.exe /add-driver $inf.FullName /install
 $devgen = Get-Command devgen.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source

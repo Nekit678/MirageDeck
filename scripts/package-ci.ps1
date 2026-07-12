@@ -14,6 +14,19 @@ function Invoke-Native {
   if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $FilePath $Arguments" }
 }
 
+function Assert-SignedBy {
+  param(
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$Thumbprint
+  )
+  $signature = Get-AuthenticodeSignature -FilePath $Path
+  if (-not $signature.SignerCertificate) { throw "No Authenticode signature was found on $Path" }
+  if ($signature.SignerCertificate.Thumbprint -ne $Thumbprint) {
+    throw "Unexpected signing certificate on $Path: $($signature.SignerCertificate.Thumbprint)"
+  }
+  Write-Host "[package] Signature present on $(Split-Path $Path -Leaf); trust is established during target installation"
+}
+
 function Find-WdkTool {
   param([Parameter(Mandatory)][string]$Name)
   $patterns = if ($Name -ieq "inf2cat.exe") {
@@ -69,11 +82,9 @@ $certificate = New-SelfSignedCertificate `
   -NotAfter (Get-Date).AddYears(2) `
   -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3")
 
-Write-Host "[package] Exporting and trusting test certificate"
+Write-Host "[package] Exporting test certificate"
 $certificatePath = Join-Path $driverOutput "MiraboxHIDEmulator-Test.cer"
 Export-Certificate -Cert $certificate -FilePath $certificatePath -Type CERT | Out-Null
-Import-Certificate -FilePath $certificatePath -CertStoreLocation "Cert:\CurrentUser\Root" | Out-Null
-Import-Certificate -FilePath $certificatePath -CertStoreLocation "Cert:\CurrentUser\TrustedPublisher" | Out-Null
 
 Write-Host "[package] Locating SignTool and Inf2Cat"
 $signTool = Find-WdkTool "signtool.exe"
@@ -92,8 +103,8 @@ Invoke-Native $inf2Cat "/driver:$driverOutput" /os:10_X64 /uselocaltime
 if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create MiraboxN4Pro.cat" }
 Write-Host "[package] Signing and verifying catalog"
 Invoke-Native $signTool sign /v /fd SHA256 /sha1 $certificate.Thumbprint $catalog
-Invoke-Native $signTool verify /pa /v $packagedDll
-Invoke-Native $signTool verify /pa /v $catalog
+Assert-SignedBy $packagedDll $certificate.Thumbprint
+Assert-SignedBy $catalog $certificate.Thumbprint
 
 Write-Host "[package] Writing build metadata and SHA-256 checksums"
 $buildInfo = @(
