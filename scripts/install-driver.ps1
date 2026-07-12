@@ -2,7 +2,7 @@ param([string]$DriverDirectory = "")
 $ErrorActionPreference = "Stop"
 
 function Invoke-Native {
-  param([Parameter(Mandatory)][string]$FilePath, [Parameter(ValueFromRemainingArguments)][string[]]$Arguments)
+  param([Parameter(Mandatory)][string]$FilePath, [string[]]$Arguments)
   & $FilePath @Arguments
   if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $FilePath $Arguments" }
 }
@@ -24,11 +24,11 @@ if (Get-PnpDevice -PresentOnly | Where-Object InstanceId -Like "ROOT\MIRABOXN4PR
 
 $certificate = Get-ChildItem $DriverDirectory -Filter *.cer -Recurse | Select-Object -First 1
 if ($certificate) {
-  Invoke-Native certutil.exe -f -addstore Root $certificate.FullName
-  Invoke-Native certutil.exe -f -addstore TrustedPublisher $certificate.FullName
+  Invoke-Native -FilePath "certutil.exe" -Arguments @("-f", "-addstore", "Root", $certificate.FullName)
+  Invoke-Native -FilePath "certutil.exe" -Arguments @("-f", "-addstore", "TrustedPublisher", $certificate.FullName)
 }
 
-Invoke-Native pnputil.exe /add-driver $inf.FullName /install
+Invoke-Native -FilePath "pnputil.exe" -Arguments @("/add-driver", $inf.FullName, "/install")
 
 $helperPath = Join-Path $PSScriptRoot "RootDeviceInstaller.cs"
 if (-not (Test-Path $helperPath)) { throw "SetupAPI helper was not found: $helperPath" }
@@ -41,7 +41,7 @@ $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
   $inf.FullName,
   "Root\MiraboxN4Pro"
 )
-Invoke-Native pnputil.exe /scan-devices
+Invoke-Native -FilePath "pnputil.exe" -Arguments @("/scan-devices")
 
 if ($rebootRequired) {
   Write-Host "The virtual Mirabox device was installed. Restart Windows before launching the panel."
