@@ -7,11 +7,12 @@ WinForms-панель показывает переданные устройст
 
 ## Что реализовано
 
-- UMDF 2 HID minidriver: usage page `0xFFA0`, usage `1`, input report 512 байт,
+- UMDF 2 HID minidriver с точным 36-байтовым report descriptor из прошивки
+  N4 Pro 02.009: usage page `0xFFA0`, usage `1`, input report 512 байт,
   output report 1024 байта;
 - профиль N4 Pro: 10 LCD-кнопок, 4 нажимаемых энкодера и touch bar с четырьмя визуальными слотами;
-- двусторонний side channel через HID feature report (он не меняет основной
-  протокол, который видит Stream Dock);
+- двусторонний служебный интерфейс драйвера для виртуальной панели, полностью
+  отделённый от HID report descriptor, который видит Stream Dock;
 - разбор команд `BAT`, `LOG`, `BGPIC`, `LIG`, `CLE`, `DIS`, `STP` и сборка
   изображений из нескольких HID-пакетов;
 - отрисовка PNG/JPEG на виртуальных кнопках и панели;
@@ -117,6 +118,6 @@ dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 
 - `driver/` — виртуальный UMDF 2 HID-драйвер;
 - `src/Mirabox.Emulator.Core/` — профиль, входные отчёты и декодер;
-- `src/Mirabox.Emulator.Panel/` — Windows-панель и HID side channel;
+- `src/Mirabox.Emulator.Panel/` — Windows-панель и служебный интерфейс драйвера;
 - `test/` — кроссплатформенные тесты без сторонних test framework;
 - `scripts/` — сборка, установка и удаление.

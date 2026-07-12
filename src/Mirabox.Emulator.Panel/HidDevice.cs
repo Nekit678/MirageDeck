@@ -14,8 +14,9 @@ internal sealed class HidDevice : IDisposable
     private const uint FileShareRead = 0x01;
     private const uint FileShareWrite = 0x02;
     private const uint OpenExisting = 3;
-    private const int SideReportLength = 1 + 4 + 1 + 4 + N4ProProfile.OutputReportLength;
-    private const uint SideMagic = 0x4556424D;
+    private const uint IoctlInjectInput = 0x00222000;
+    private const uint IoctlGetOutput = 0x00222004;
+    private static readonly Guid EmulatorInterfaceGuid = new("9A6C3D56-2683-4B22-9359-8FB4C38479B9");
 
     private readonly SafeFileHandle _handle;
 
@@ -23,15 +24,15 @@ internal sealed class HidDevice : IDisposable
 
     public static HidDevice OpenN4Pro()
     {
-        HidD_GetHidGuid(out var hidGuid);
-        var set = SetupDiGetClassDevs(ref hidGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+        var interfaceGuid = EmulatorInterfaceGuid;
+        var set = SetupDiGetClassDevs(ref interfaceGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
         if (set == new IntPtr(-1)) throw new Win32Exception();
         try
         {
             for (uint index = 0; ; index++)
             {
                 var info = new SpDeviceInterfaceData { Size = Marshal.SizeOf<SpDeviceInterfaceData>() };
-                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref hidGuid, index, ref info))
+                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref interfaceGuid, index, ref info))
                 {
                     if (Marshal.GetLastWin32Error() == 259) break;
                     continue;
@@ -48,12 +49,7 @@ internal sealed class HidDevice : IDisposable
                     var handle = CreateFile(path, GenericRead | GenericWrite, FileShareRead | FileShareWrite,
                         IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
                     if (handle.IsInvalid) { handle.Dispose(); continue; }
-                    var attributes = new HiddAttributes { Size = Marshal.SizeOf<HiddAttributes>() };
-                    if (HidD_GetAttributes(handle, ref attributes)
-                        && attributes.VendorId == N4ProProfile.VendorId
-                        && attributes.ProductId == N4ProProfile.ProductId)
-                        return new HidDevice(handle);
-                    handle.Dispose();
+                    return new HidDevice(handle);
                 }
                 finally { Marshal.FreeHGlobal(detail); }
             }
@@ -65,26 +61,19 @@ internal sealed class HidDevice : IDisposable
     public void InjectInput(ReadOnlySpan<byte> report)
     {
         if (report.Length != N4ProProfile.InputReportLength) throw new ArgumentException("Invalid input report", nameof(report));
-        var side = new byte[SideReportLength];
-        side[0] = N4ProProfile.SideChannelReportId;
-        BitConverter.TryWriteBytes(side.AsSpan(1, 4), SideMagic);
-        side[5] = 1;
-        report.CopyTo(side.AsSpan(10));
-        if (!HidD_SetFeature(_handle, side, side.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var input = report.ToArray();
+        if (!DeviceIoControl(_handle, IoctlInjectInput, input, input.Length, null, 0, out _, IntPtr.Zero))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
     }
 
     public bool TryReadOutput(out byte[] packet)
     {
-        var side = new byte[SideReportLength];
-        side[0] = N4ProProfile.SideChannelReportId;
-        if (!HidD_GetFeature(_handle, side, side.Length)) throw new Win32Exception(Marshal.GetLastWin32Error());
-        if (BitConverter.ToUInt32(side, 1) != SideMagic || side[5] != 2)
-        {
-            packet = [];
-            return false;
-        }
-        packet = side.AsSpan(10, N4ProProfile.OutputReportLength).ToArray();
-        return true;
+        packet = new byte[N4ProProfile.OutputReportLength];
+        if (!DeviceIoControl(_handle, IoctlGetOutput, null, 0, packet, packet.Length, out var received, IntPtr.Zero))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        if (received == packet.Length) return true;
+        packet = [];
+        return false;
     }
 
     public void Dispose() => _handle.Dispose();
@@ -98,26 +87,11 @@ internal sealed class HidDevice : IDisposable
         public IntPtr Reserved;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct HiddAttributes
-    {
-        public int Size;
-        public ushort VendorId;
-        public ushort ProductId;
-        public ushort VersionNumber;
-    }
-
-    [DllImport("hid.dll")]
-    private static extern void HidD_GetHidGuid(out Guid guid);
-    [DllImport("hid.dll", SetLastError = true)]
+    [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_GetAttributes(SafeFileHandle handle, ref HiddAttributes attributes);
-    [DllImport("hid.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
-    [DllImport("hid.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
+    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode,
+        byte[]? input, int inputLength, byte[]? output, int outputLength,
+        out int bytesReturned, IntPtr overlapped);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);
@@ -133,4 +107,3 @@ internal sealed class HidDevice : IDisposable
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode, IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 }
-

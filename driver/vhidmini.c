@@ -14,24 +14,20 @@ static const WCHAR ProductString[] = L"HOTSPOTEKUSB HID DEMO";
 static const WCHAR SerialString[] = L"123456712345";
 static const UCHAR FirmwareVersion[] = "V4.N4 Pro E.02.009";
 
-static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
-    0x06, 0xA0, 0xFF,                   /* Usage Page 0xFFA0 */
-    0x09, 0x01,                         /* Usage 1 */
-    0xA1, 0x01,                         /* Application collection */
-    0x15, 0x00, 0x26, 0xFF, 0x00,
-    0x75, 0x08,
-    0x09, 0x01,                         /* Usage for input main item */
-    0x96, 0x00, 0x02,                   /* 512-byte input report */
-    0x81, 0x00,
-    0x09, 0x01,                         /* Usage for output main item */
-    0x96, 0x00, 0x04,                   /* 1024-byte output report */
-    0x91, 0x00,
-    0x09, 0x01,                         /* Usage for feature main item */
-    0x96, (N4PRO_FEATURE_PAYLOAD_SIZE & 0xFF),
-          (N4PRO_FEATURE_PAYLOAD_SIZE >> 8),
-    0xB1, 0x00,                         /* Side-channel feature report */
-    0xC0
+/* {9A6C3D56-2683-4B22-9359-8FB4C38479B9} */
+static const GUID GUID_DEVINTERFACE_MIRABOX_EMULATOR = {
+    0x9a6c3d56, 0x2683, 0x4b22,
+    { 0x93, 0x59, 0x8f, 0xb4, 0xc3, 0x84, 0x79, 0xb9 }
 };
+
+/* Exact 36-byte report descriptor extracted from N4 Pro firmware 02.009. */
+static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
+    0x06, 0xA0, 0xFF, 0x09, 0x01, 0xA1, 0x01, 0x09, 0x02,
+    0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x96, 0x00,
+    0x02, 0x81, 0x02, 0x09, 0x03, 0x15, 0x00, 0x26, 0xFF,
+    0x00, 0x75, 0x08, 0x96, 0x00, 0x04, 0x91, 0x02, 0xC0
+};
+C_ASSERT(sizeof(G_ReportDescriptor) == 36);
 
 static HID_DESCRIPTOR G_HidDescriptor = {
     0x09, 0x21, 0x0200, 0x00, 0x01,
@@ -41,8 +37,8 @@ static HID_DESCRIPTOR G_HidDescriptor = {
 static NTSTATUS CreateQueues(WDFDEVICE Device);
 static NTSTATUS ReadReport(PDEVICE_CONTEXT Context, WDFREQUEST Request, BOOLEAN* Complete);
 static NTSTATUS CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
+static NTSTATUS InjectInput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
+static NTSTATUS GetCapturedOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetInputReport(WDFREQUEST Request);
 static NTSTATUS GetString(WDFREQUEST Request);
 static VOID ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload);
@@ -85,6 +81,8 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     WDF_OBJECT_ATTRIBUTES_INIT(&lockAttributes);
     lockAttributes.ParentObject = device;
     status = WdfWaitLockCreate(&lockAttributes, &context->RingLock);
+    if (!NT_SUCCESS(status)) return status;
+    status = WdfDeviceCreateDeviceInterface(device, &GUID_DEVINTERFACE_MIRABOX_EMULATOR, NULL);
     if (!NT_SUCCESS(status)) return status;
     return CreateQueues(device);
 }
@@ -136,11 +134,11 @@ EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     case IOCTL_UMDF_HID_SET_OUTPUT_REPORT:
         status = CaptureOutput(context, Request);
         break;
-    case IOCTL_UMDF_HID_SET_FEATURE:
-        status = SetFeature(context, Request);
+    case IOCTL_MIRABOX_INJECT_INPUT:
+        status = InjectInput(context, Request);
         break;
-    case IOCTL_UMDF_HID_GET_FEATURE:
-        status = GetFeature(context, Request);
+    case IOCTL_MIRABOX_GET_OUTPUT:
+        status = GetCapturedOutput(context, Request);
         break;
     case IOCTL_UMDF_HID_GET_INPUT_REPORT:
         status = GetInputReport(Request);
@@ -216,33 +214,31 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 }
 
 static NTSTATUS
-SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+InjectInput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
-    HID_XFER_PACKET packet;
-    PN4PRO_SIDE_REPORT side;
+    UCHAR* report;
+    size_t length;
     WDFREQUEST readRequest = NULL;
-    NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
+    NTSTATUS status = WdfRequestRetrieveInputBuffer(
+        Request, N4PRO_INPUT_REPORT_SIZE, (PVOID*)&report, &length);
     if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != N4PRO_SIDE_REPORT_ID || packet.reportBufferLen < sizeof(N4PRO_SIDE_REPORT))
+    if (length != N4PRO_INPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
-    side = (PN4PRO_SIDE_REPORT)packet.reportBuffer;
-    if (side->Magic != N4PRO_SIDE_MAGIC || side->Command != N4PRO_SIDE_INJECT_INPUT)
-        return STATUS_INVALID_PARAMETER;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
     status = WdfIoQueueRetrieveNextRequest(Context->ReadQueue, &readRequest);
     if (!NT_SUCCESS(status)) {
-        EnqueueInputLocked(Context, side->Data);
+        EnqueueInputLocked(Context, report);
     }
     WdfWaitLockRelease(Context->RingLock);
 
     if (readRequest != NULL) {
-        status = RequestCopyFromBuffer(readRequest, side->Data, N4PRO_INPUT_REPORT_SIZE);
+        status = RequestCopyFromBuffer(readRequest, report, N4PRO_INPUT_REPORT_SIZE);
         WdfRequestComplete(readRequest, status);
     } else {
         status = STATUS_SUCCESS;
     }
-    WdfRequestSetInformation(Request, sizeof(N4PRO_SIDE_REPORT));
+    WdfRequestSetInformation(Request, N4PRO_INPUT_REPORT_SIZE);
     return status;
 }
 
@@ -318,29 +314,25 @@ ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload)
 }
 
 static NTSTATUS
-GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+GetCapturedOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
-    HID_XFER_PACKET packet;
-    N4PRO_SIDE_REPORT side;
-    NTSTATUS status = RequestGetHidXferPacketToRead(Request, &packet);
+    UCHAR* output;
+    size_t length;
+    NTSTATUS status = WdfRequestRetrieveOutputBuffer(
+        Request, N4PRO_OUTPUT_REPORT_SIZE, (PVOID*)&output, &length);
     if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != N4PRO_SIDE_REPORT_ID || packet.reportBufferLen < sizeof(side))
-        return STATUS_INVALID_BUFFER_SIZE;
-
-    RtlZeroMemory(&side, sizeof(side));
-    side.Magic = N4PRO_SIDE_MAGIC;
-    side.Command = N4PRO_SIDE_NO_PACKET;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
-    side.Sequence = Context->OutputSequence;
     if (Context->OutputCount != 0) {
-        side.Command = N4PRO_SIDE_OUTPUT_PACKET;
-        RtlCopyMemory(side.Data, Context->OutputRing[Context->OutputHead], N4PRO_OUTPUT_REPORT_SIZE);
+        RtlCopyMemory(output, Context->OutputRing[Context->OutputHead], N4PRO_OUTPUT_REPORT_SIZE);
         Context->OutputHead = (Context->OutputHead + 1) % N4PRO_RING_CAPACITY;
         Context->OutputCount--;
+        WdfRequestSetInformation(Request, N4PRO_OUTPUT_REPORT_SIZE);
+    } else {
+        WdfRequestSetInformation(Request, 0);
     }
     WdfWaitLockRelease(Context->RingLock);
-    return RequestCopyFromBuffer(Request, &side, sizeof(side));
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS
