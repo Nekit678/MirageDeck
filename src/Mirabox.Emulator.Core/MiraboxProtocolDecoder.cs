@@ -28,6 +28,18 @@ public sealed class MiraboxProtocolDecoder
         if (command.SequenceEqual("LIG"u8)) return [new BrightnessUpdate(packet[10])];
         if (command.SequenceEqual("DIS"u8)) return [new WakeUpdate()];
         if (command.SequenceEqual("STP"u8)) return [new RefreshUpdate()];
+        if (command.SequenceEqual("MOD"u8))
+        {
+            // transport_change_mode writes mode + 0x31 to byte 10.
+            // Accept the raw 0/1 form as well for compatibility with older
+            // Stream Dock builds that construct the packet themselves.
+            return packet[10] switch
+            {
+                0 or (byte)'0' or (byte)'1' => [new TouchModeUpdate(false)],
+                1 or (byte)'2' => [new TouchModeUpdate(true)],
+                _ => [new UnknownCommandUpdate(packet.ToArray())],
+            };
+        }
         if (command.SequenceEqual("CLE"u8))
             return packet[11] == 0xFF ? [new ClearAllUpdate()] : [new ClearKeyUpdate(packet[11])];
 

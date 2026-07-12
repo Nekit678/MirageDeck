@@ -55,7 +55,8 @@ Touch point использует заголовок `ACK 00 ARX`; координ
 в байтах 10–13. Он используется произвольными модулями в Touchbar Mode. В Button
 Mode касание обрабатывается как одна из четырёх экранных областей. Свайпы
 влево/вправо в обоих режимах — hardware code `38`/`39`. Вертикальный свайп
-локально переключает Button Mode и Touchbar Mode и отдельного input-кода не имеет.
+локально переключает Button Mode и Touchbar Mode. Новые версии Stream Dock также
+могут синхронизировать режим выходной командой `MOD`.
 
 ## Выходные команды
 
@@ -66,6 +67,7 @@ Mode касание обрабатывается как одна из четыр
 | `BAT` | bytes 8–11: длина big-endian, byte 12: image slot |
 | `LOG` | bytes 8–11: длина background stream |
 | `BGPIC` | bytes 10–13: длина background frame; далее geometry |
+| `MOD` | byte 10: ASCII `1` — Button Mode, `2` — Touchbar Mode |
 | `LIG` | byte 10: яркость |
 | `CLE` | byte 11: slot или `FF` для всех |
 | `DIS` | включить экран |

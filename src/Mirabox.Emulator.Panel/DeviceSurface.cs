@@ -27,6 +27,7 @@ internal sealed class DeviceSurface : Control
 
     public event Action<byte[], string>? InputGenerated;
     public event Action<string>? StatusChanged;
+    public event Action? TouchModeSelected;
     public byte Brightness { get; set; } = 100;
     public Image? BackgroundImageValue { get; private set; }
     public TouchDisplayMode TouchMode => _touchMode;
@@ -354,6 +355,11 @@ internal sealed class DeviceSurface : Control
         base.OnMouseMove(e);
         if (_touching)
         {
+            if (TrySwitchTouchMode(e.Location))
+            {
+                UpdateHover(e.Location);
+                return;
+            }
             if (_touchMode == TouchDisplayMode.TouchBar)
                 EmitTouch(e.Location);
         }
@@ -381,17 +387,11 @@ internal sealed class DeviceSurface : Control
         {
             _activeKnob = -1;
         }
-        if (_touching)
+        if (_touching && !TrySwitchTouchMode(e.Location))
         {
             var deltaX = e.X - _touchStart.X;
-            var deltaY = e.Y - _touchStart.Y;
-            var verticalSwipe = Math.Abs(deltaY) > Math.Max(24, _touchRect.Height / 3) && Math.Abs(deltaY) > Math.Abs(deltaX);
             var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
-            if (verticalSwipe)
-            {
-                SetTouchMode(deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button);
-            }
-            else if (horizontalSwipe)
+            if (horizontalSwipe)
             {
                 Emit(InputReportFactory.Swipe(deltaX < 0), deltaX < 0 ? "Свайп влево" : "Свайп вправо");
             }
@@ -433,7 +433,7 @@ internal sealed class DeviceSurface : Control
             Invalidate();
     }
 
-    private void SetTouchMode(TouchDisplayMode mode)
+    public void SetTouchMode(TouchDisplayMode mode)
     {
         if (_touchMode == mode) return;
         _touchMode = mode;
@@ -443,6 +443,23 @@ internal sealed class DeviceSurface : Control
             ? "Button Mode: экран связан с четырьмя энкодерами"
             : "Touchbar Mode: экран принимает координатные касания");
         Invalidate();
+    }
+
+    private bool TrySwitchTouchMode(Point location)
+    {
+        var deltaX = location.X - _touchStart.X;
+        var deltaY = location.Y - _touchStart.Y;
+        var threshold = Math.Max(18, _touchRect.Height / 5);
+        if (Math.Abs(deltaY) <= threshold || Math.Abs(deltaY) <= Math.Abs(deltaX))
+            return false;
+
+        var mode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
+        var changed = _touchMode != mode;
+        SetTouchMode(mode);
+        if (changed) TouchModeSelected?.Invoke();
+        _touching = false;
+        _activeSecondary = -1;
+        return true;
     }
 
     private int SegmentAt(Point location) =>

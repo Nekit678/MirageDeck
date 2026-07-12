@@ -9,6 +9,8 @@ var tests = new (string Name, Action Run)[]
     ("input secondary tap packet", TestInputSecondaryTap),
     ("input touch point packet", TestInputTouchPoint),
     ("input swipe packet", TestInputSwipe),
+    ("button mode command", TestButtonMode),
+    ("touchbar mode command", TestTouchBarMode),
     ("brightness command", TestBrightness),
     ("fragmented key image", TestImage),
     ("background image", TestBackground),
@@ -74,6 +76,22 @@ static void TestInputSwipe()
     Equal((byte)0x39, right[9]);
     Equal((byte)0, left[10]);
     Equal((byte)0, right[10]);
+}
+
+static void TestButtonMode()
+{
+    var packet = Packet("MOD");
+    packet[10] = (byte)'1';
+    var update = Single<TouchModeUpdate>(new MiraboxProtocolDecoder().Push(packet));
+    Equal(false, update.TouchBar);
+}
+
+static void TestTouchBarMode()
+{
+    var packet = Packet("MOD");
+    packet[10] = (byte)'2';
+    var update = Single<TouchModeUpdate>(new MiraboxProtocolDecoder().Push(packet));
+    Equal(true, update.TouchBar);
 }
 
 static void TestBrightness()
