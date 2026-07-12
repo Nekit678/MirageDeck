@@ -46,6 +46,8 @@ jobs:
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
+        with:
+          msbuild-architecture: x64
 
       - name: Restore WDK and Windows SDK build packages
         shell: pwsh
