@@ -194,13 +194,20 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
      * exposes the report buffer as input memory only after the auxiliary
      * output memory for the report ID has been retrieved. */
     status = WdfRequestRetrieveOutputMemory(Request, &outputMemory);
-    if (!NT_SUCCESS(status)) {
+    if (NT_SUCCESS(status)) {
+        WdfMemoryGetBuffer(outputMemory, &outputLength);
+        Context->LastWriteOutputLength = (ULONG)outputLength;
+    } else if (status == STATUS_BUFFER_TOO_SMALL) {
+        /* An unnumbered report has report ID zero. mshidumdf represents that
+         * as a zero-length auxiliary output buffer, for which WDF returns
+         * STATUS_BUFFER_TOO_SMALL. There is no memory object to read, but the
+         * actual report remains available as input memory. */
+        outputLength = 0;
+    } else {
         Context->LastWriteStage = 2;
         Context->LastWriteStatus = status;
         return status;
     }
-    WdfMemoryGetBuffer(outputMemory, &outputLength);
-    Context->LastWriteOutputLength = (ULONG)outputLength;
 
     status = WdfRequestRetrieveInputMemory(Request, &inputMemory);
     if (!NT_SUCCESS(status)) {
