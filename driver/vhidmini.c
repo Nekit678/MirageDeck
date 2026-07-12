@@ -189,7 +189,10 @@ CaptureOutput(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     ULONG tail;
     NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
-    if (packet.reportId != 0 || packet.reportBufferLen < N4PRO_OUTPUT_REPORT_SIZE)
+    /* mshidumdf passes an unnumbered report as reportId=1 because the UMDF
+     * bridge stores the ID in an auxiliary output-buffer length. Accept both
+     * the logical zero and that one-byte bridge representation. */
+    if (packet.reportId > 1 || packet.reportBufferLen < N4PRO_OUTPUT_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
     payload = OutputPayload(&packet);
 
