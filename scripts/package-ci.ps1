@@ -22,7 +22,7 @@ function Assert-SignedBy {
   $signature = Get-AuthenticodeSignature -FilePath $Path
   if (-not $signature.SignerCertificate) { throw "No Authenticode signature was found on $Path" }
   if ($signature.SignerCertificate.Thumbprint -ne $Thumbprint) {
-    throw "Unexpected signing certificate on $Path: $($signature.SignerCertificate.Thumbprint)"
+    throw "Unexpected signing certificate on ${Path}: $($signature.SignerCertificate.Thumbprint)"
   }
   Write-Host "[package] Signature present on $(Split-Path $Path -Leaf); trust is established during target installation"
 }
