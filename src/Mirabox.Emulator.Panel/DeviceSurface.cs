@@ -7,6 +7,9 @@ internal sealed class DeviceSurface : Control
 {
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
+    // Ignore ordinary mouse jitter so a click remains a tap instead of
+    // becoming the first step of a scrolling gesture.
+    private const int TouchDragThreshold = 8;
     private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
@@ -352,8 +355,6 @@ internal sealed class DeviceSurface : Control
             _touching = true;
             _touchStart = e.Location;
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
-            if (_touchMode == TouchDisplayMode.TouchBar)
-                EmitTouch(e.Location, force: true);
             Invalidate();
         }
     }
@@ -368,7 +369,8 @@ internal sealed class DeviceSurface : Control
                 UpdateHover(e.Location);
                 return;
             }
-            if (_touchMode == TouchDisplayMode.TouchBar)
+            if (_touchMode == TouchDisplayMode.TouchBar &&
+                (_lastTouchLocation is not null || StartHorizontalTouchDrag(e.Location)))
                 EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
@@ -399,11 +401,13 @@ internal sealed class DeviceSurface : Control
         {
             if (_touchMode == TouchDisplayMode.TouchBar)
             {
-                // ARX has no separate release flag. The physical controller
-                // reports the contact from its first point through its final
-                // point; Stream Dock derives taps and scrolling from that
-                // sequence and the pause after it.
-                EmitTouch(e.Location, force: true);
+                FlushPendingTouch();
+                if (_lastTouchLocation is null && !HasTouchDragStarted(e.Location))
+                {
+                    // Sending this on MouseDown makes scrollable modules jump.
+                    // Wait until release so a stationary click is one point.
+                    EmitTouch(e.Location, force: true);
+                }
             }
             else
             {
@@ -486,6 +490,26 @@ internal sealed class DeviceSurface : Control
 
     private RectangleF TouchSegment(int index) =>
         new(_touchRect.Left + index * _touchRect.Width / 4, _touchRect.Top, _touchRect.Width / 4, _touchRect.Height);
+
+    private bool HasTouchDragStarted(Point location)
+    {
+        var deltaX = location.X - _touchStart.X;
+        var deltaY = location.Y - _touchStart.Y;
+        return deltaX * deltaX + deltaY * deltaY >= TouchDragThreshold * TouchDragThreshold;
+    }
+
+    private bool StartHorizontalTouchDrag(Point location)
+    {
+        var deltaX = location.X - _touchStart.X;
+        var deltaY = location.Y - _touchStart.Y;
+        if (!HasTouchDragStarted(location) || Math.Abs(deltaX) < Math.Abs(deltaY))
+            return false;
+
+        // Seed the gesture at the real press point only after it has been
+        // classified as a drag, preventing taps from moving the content.
+        EmitTouch(_touchStart, force: true);
+        return true;
+    }
 
     private void EmitTouch(Point location, bool force = false)
     {
