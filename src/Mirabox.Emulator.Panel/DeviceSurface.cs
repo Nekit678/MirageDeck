@@ -7,6 +7,7 @@ internal sealed class DeviceSurface : Control
 {
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
+    private const int TouchDragThreshold = 3;
     private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
@@ -308,8 +309,8 @@ internal sealed class DeviceSurface : Control
     {
         using var font = new Font(Font.FontFamily, Math.Max(7f, 8.5f * scale), FontStyle.Regular, GraphicsUnit.Pixel);
         var hint = _touchMode == TouchDisplayMode.Button
-            ? "Экран: клик — функция  •  свайп ↑ — Touchbar  •  энкодер: колесо — вращение"
-            : "Touchbar: касание — функция  •  свайп ↓ — Button Mode  •  энкодер: колесо — вращение";
+            ? "Button Mode: индикаторы энкодеров  •  свайп ↑ — Touchbar  •  колесо — вращение"
+            : "Touchbar: тап — действие  •  свайп ↔ — прокрутка  •  свайп ↓ — Button Mode";
         TextRenderer.DrawText(graphics, hint, font,
             Rectangle.Round(rect), Palette.MutedText,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
@@ -352,8 +353,6 @@ internal sealed class DeviceSurface : Control
             _touching = true;
             _touchStart = e.Location;
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
-            if (_touchMode == TouchDisplayMode.TouchBar)
-                EmitTouch(e.Location, force: true);
             Invalidate();
         }
     }
@@ -368,7 +367,8 @@ internal sealed class DeviceSurface : Control
                 UpdateHover(e.Location);
                 return;
             }
-            if (_touchMode == TouchDisplayMode.TouchBar)
+            if (_touchMode == TouchDisplayMode.TouchBar &&
+                (_lastTouchLocation is not null || HasHorizontalTouchDragStarted(e.Location)))
                 EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
@@ -408,6 +408,13 @@ internal sealed class DeviceSurface : Control
             else if (_touchMode == TouchDisplayMode.Button && _activeSecondary >= 0)
             {
                 Emit(InputReportFactory.SecondaryTap(_activeSecondary), $"Функция энкодера {_activeSecondary + 1}");
+            }
+            else if (_touchMode == TouchDisplayMode.TouchBar &&
+                     _lastTouchLocation is null && !HasTouchDragStarted(e.Location))
+            {
+                // A tap is emitted on release. Sending it in MouseDown makes
+                // sliders and scrollable modules jump before a drag begins.
+                EmitTouch(e.Location, force: true);
             }
             _touching = false;
             _activeSecondary = -1;
@@ -480,6 +487,20 @@ internal sealed class DeviceSurface : Control
 
     private RectangleF TouchSegment(int index) =>
         new(_touchRect.Left + index * _touchRect.Width / 4, _touchRect.Top, _touchRect.Width / 4, _touchRect.Height);
+
+    private bool HasTouchDragStarted(Point location)
+    {
+        var deltaX = location.X - _touchStart.X;
+        var deltaY = location.Y - _touchStart.Y;
+        return deltaX * deltaX + deltaY * deltaY >= TouchDragThreshold * TouchDragThreshold;
+    }
+
+    private bool HasHorizontalTouchDragStarted(Point location)
+    {
+        var deltaX = location.X - _touchStart.X;
+        var deltaY = location.Y - _touchStart.Y;
+        return HasTouchDragStarted(location) && Math.Abs(deltaX) >= Math.Abs(deltaY);
+    }
 
     private void EmitTouch(Point location, bool force = false)
     {
