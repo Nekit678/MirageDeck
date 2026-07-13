@@ -8,6 +8,7 @@ var tests = new (string Name, Action Run)[]
     ("input knob press packet", TestInputKnobPress),
     ("input secondary tap packet", TestInputSecondaryTap),
     ("input touch point packet", TestInputTouchPoint),
+    ("input touch contact packets", TestInputTouchContact),
     ("input swipe packet", TestInputSwipe),
     ("button mode command", TestButtonMode),
     ("touchbar mode command", TestTouchBarMode),
@@ -69,6 +70,22 @@ static void TestInputTouchPoint()
     Equal((byte)0x23, report[11]);
     Equal((byte)0x04, report[12]);
     Equal((byte)0x56, report[13]);
+}
+
+static void TestInputTouchContact()
+{
+    var down = InputReportFactory.TouchContact(0x0123, true);
+    var up = InputReportFactory.TouchContact(0x0123, false);
+    Equal((byte)'A', down[0]);
+    Equal((byte)'O', down[5]);
+    Equal((byte)'K', down[6]);
+    Equal((byte)0, down[9]);
+    Equal((byte)1, down[10]);
+    Equal((byte)0, up[10]);
+    Equal((byte)0x01, down[11]);
+    Equal((byte)0x23, down[12]);
+    Equal((byte)0x01, up[11]);
+    Equal((byte)0x23, up[12]);
 }
 
 static void TestInputSwipe()

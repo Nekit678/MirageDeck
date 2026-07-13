@@ -9,7 +9,6 @@ internal sealed class DeviceSurface : Control
     // becoming the first step of a scrolling gesture.
     private const int TouchDragThreshold = 8;
     private const int TouchReportIntervalMs = 16;
-    private const int TouchTapReportCount = 2;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
     private readonly Image?[] _keys = new Image?[10];
@@ -537,22 +536,21 @@ internal sealed class DeviceSurface : Control
 
     private void EmitTouchTap(Point location)
     {
-        // ARX has no contact phase. A stationary physical touch therefore
-        // arrives as a short run of identical samples. Keep the coordinate
-        // already known to Stream Dock so a tap after a drag cannot become a
-        // synthetic movement from the previous contact, then repeat it so the
-        // current touchbar action receives a stationary press.
-        var touchPoint = _lastTouchPoint ?? ToLogicalTouchPoint(location);
-        for (var i = 0; i < TouchTapReportCount; i++)
-            EmitTouchPoint(touchPoint, force: true, repeat: true);
+        // ARX only updates the touchbar coordinate and is interpreted as
+        // scrolling. A physical stationary touch uses a separate ACK/OK
+        // down/up pair whose X coordinate selects the item to activate.
+        // Zero is reserved as "no coordinate" by Stream Dock's parser.
+        var x = (ushort)Math.Max(1, ToLogicalTouchPoint(location).X);
+        Emit(InputReportFactory.TouchContact(x, true), $"Touchbar: нажатие {x}");
+        Emit(InputReportFactory.TouchContact(x, false), $"Touchbar: отпускание {x}");
     }
 
     private void EmitTouchDrag(Point location, bool force = false) =>
         EmitTouchPoint(ToDragTouchPoint(location), force);
 
-    private void EmitTouchPoint(Point touchPoint, bool force = false, bool repeat = false)
+    private void EmitTouchPoint(Point touchPoint, bool force = false)
     {
-        if (!repeat && _lastTouchPoint == touchPoint)
+        if (_lastTouchPoint == touchPoint)
         {
             _pendingTouchPoint = null;
             return;

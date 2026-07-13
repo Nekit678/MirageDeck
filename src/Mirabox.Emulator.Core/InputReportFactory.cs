@@ -53,6 +53,20 @@ public static class InputReportFactory
         return report;
     }
 
+    /// <summary>
+    /// A stationary N4 Pro touch uses the ordinary ACK/OK header, followed by
+    /// a contact phase and the big-endian horizontal coordinate. Stream Dock
+    /// turns a matching down/up pair into a touchbar item click.
+    /// </summary>
+    public static byte[] TouchContact(ushort x, bool pressed)
+    {
+        var report = Header();
+        report[10] = pressed ? (byte)1 : (byte)0;
+        report[11] = (byte)(x >> 8);
+        report[12] = (byte)x;
+        return report;
+    }
+
     private static byte[] Event(byte hardwareCode, byte state)
     {
         var report = Header();
