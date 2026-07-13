@@ -6,6 +6,15 @@
   <Import Project="packages\Microsoft.Windows.SDK.CPP.10.0.28000.1839\build\native\Microsoft.Windows.SDK.cpp.props"
           Condition="Exists('packages\Microsoft.Windows.SDK.CPP.10.0.28000.1839\build\native\Microsoft.Windows.SDK.cpp.props') and '$(MSBuildProjectExtension)' == '.vcxproj'" />
   <PropertyGroup>
+    <Version>1.0.13</Version>
+    <AssemblyVersion>1.0.13.0</AssemblyVersion>
+    <FileVersion>1.0.13.0</FileVersion>
+    <InformationalVersion>1.0.13</InformationalVersion>
+    <Authors>Nikita Rybakov</Authors>
+    <Company>MirageDeck Project</Company>
+    <Product>MirageDeck</Product>
+    <Copyright>Copyright (c) 2026 Nikita Rybakov</Copyright>
+    <RepositoryUrl>https://github.com/Nekit678/MiraboxHIDEmulator</RepositoryUrl>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

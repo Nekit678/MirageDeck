@@ -37,7 +37,7 @@
     <line x1="100" y1="136" x2="1100" y2="136" stroke="#343740"/>
     <rect x="126" y="87" width="24" height="24" rx="6" fill="#141519" stroke="#31d2ef" stroke-width="2"/>
     <g fill="#31d2ef"><rect x="131" y="92" width="5" height="5" rx="1"/><rect x="140" y="92" width="5" height="5" rx="1"/><rect x="131" y="101" width="5" height="5" rx="1"/><rect x="140" y="101" width="5" height="5" rx="1"/></g>
-    <text x="170" y="107" fill="#eef0f4" font-family="Segoe UI, Arial, sans-serif" font-size="22">Mirabox N4 Pro — виртуальная панель</text>
+    <text x="170" y="107" fill="#eef0f4" font-family="Segoe UI, Arial, sans-serif" font-size="22">MirageDeck — N4 Pro-совместимая панель</text>
     <path d="M975 100h18" stroke="#c4c7cf" stroke-width="2"/>
     <rect x="1019" y="91" width="17" height="15" fill="none" stroke="#c4c7cf" stroke-width="2"/>
     <path d="M1063 91l18 18m0-18-18 18" stroke="#c4c7cf" stroke-width="2"/>

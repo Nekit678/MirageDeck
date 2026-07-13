@@ -15,7 +15,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "Mirabox N4 Pro — виртуальная панель";
+        Text = "MirageDeck — N4 Pro-совместимая виртуальная панель";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(740, 530);
         ClientSize = new Size(900, 600);
@@ -41,7 +41,7 @@ internal sealed class MainForm : Form
         catch (Exception error)
         {
             SetStatus(error.Message, StatusKind.Error);
-            MessageBox.Show(this, error.Message, "Mirabox HID Emulator", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, error.Message, "MirageDeck", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 

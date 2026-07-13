@@ -5,8 +5,8 @@
 <h1 align="center">MirageDeck</h1>
 
 <p align="center">
-  A virtual Mirabox Stream Dock N4 Pro for Windows 11.<br>
-  Full HID emulation, an on-screen control panel, and no physical device required.
+  An independent N4 Pro-compatible virtual HID for Windows 11.<br>
+  Selected-profile emulation, an on-screen control panel, and testing tools.
 </p>
 
 <p align="center">
@@ -21,14 +21,14 @@
 </p>
 
 > [!WARNING]
-> **MirageDeck 1.x is the project's first public major release.** The main workflows are operational, but bugs, incompatibilities with specific Stream Dock versions, and unrecognized protocol commands are still possible. The project will continue to receive fixes, compatibility improvements, and new features. Read [Limitations](#limitations) before installing it.
+> **MirageDeck 1.x is at an early stage.** The main workflows are operational, but bugs, incompatibilities with specific Stream Dock versions, and unrecognized protocol commands are still possible. GitHub Actions artifacts are for development and testing; they are not production releases. Read [Limitations](#limitations) before installing one.
 
 MirageDeck creates a virtual Windows HID device using the global **Mirabox N4ProE `5548:1021`** profile. The official Stream Dock application recognizes it as regular hardware and sends key and touch-display artwork. A separate WinForms application renders that artwork and sends key presses, encoder input, and touch gestures back to Stream Dock.
 
 ## Demo
 
 <p align="center">
-  <img src="docs/assets/panel-preview.png" width="900" alt="MirageDeck virtual panel interface">
+  <img src="docs/assets/panel-preview.svg" width="900" alt="MirageDeck virtual panel interface">
 </p>
 
 <p align="center"><sub>A static preview of the current interface. In the running panel, key and touch-display artwork comes directly from Stream Dock.</sub></p>
@@ -40,7 +40,7 @@ Stream Dock ◀──keys, encoders, gestures── virtual HID ◀── Mirage
 
 ## Features
 
-- a virtual **UMDF 2 HID minidriver** matching the N4 Pro `02.009` firmware profile;
+- a virtual **UMDF 2 HID minidriver** implementing selected behavior of the N4 Pro `02.009` firmware profile;
 - 10 LCD keys, 4 pushable encoders, and a touch display with two operating modes;
 - rendering of PNG, JPEG, and raw BGR24 artwork sent by Stream Dock;
 - key down/up events, encoder presses, and encoder rotation;
@@ -48,17 +48,17 @@ Stream Dock ◀──keys, encoders, gestures── virtual HID ◀── Mirage
 - Touchbar Mode with coordinate touches, taps, and horizontal dragging;
 - brightness, clear, wake, and automatic protocol-driven mode switching;
 - a streaming decoder for `BAT`, `LOG`, `BGPIC`, `MOD`, `LIG`, `CLE`, `DIS`, and `STP`;
-- cross-platform core tests and a ready-to-install `win-x64` package from GitHub Actions.
+- cross-platform core tests and a development `win-x64` package from GitHub Actions.
 
 ## Quick start
 
 > [!IMPORTANT]
-> The CI package uses an ephemeral self-signed certificate. The installer adds its public part to the machine-wide `Root` and `TrustedPublisher` stores, so administrator privileges are required. MirageDeck uses UMDF 2 and contains no custom kernel-mode `.sys`: **you do not need to enable Test Mode or disable Secure Boot**. Only install packages from a CI run you trust.
+> The development/CI package uses a dedicated ephemeral self-signed certificate. Before importing its public part, the installer re-verifies the package, displays its subject, issuer, expiry, and SHA-256 fingerprint, and requires you to type `INSTALL`. Importing it changes the machine-wide `Root` and `TrustedPublisher` stores, so administrator privileges are required. MirageDeck uses UMDF 2 and contains no custom kernel-mode `.sys`: **you do not need to enable Test Mode or disable Secure Boot**. Enterprise WDAC/App Control policy may still block the package. Only install artifacts from trusted runs of the official workflow.
 
-### Ready-made GitHub Actions package
+### GitHub Actions development package
 
 1. Open **[Actions → Build Windows package](https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml)**.
-2. Select the latest successful run and download the `MiraboxHIDEmulator-win-x64` artifact.
+2. Select the latest successful run and download the `MirageDeck-development-win-x64` artifact.
 3. Extract the ZIP completely into a dedicated directory.
 4. Open an elevated PowerShell window in the extracted package directory:
 
@@ -68,9 +68,9 @@ Stream Dock ◀──keys, encoders, gestures── virtual HID ◀── Mirage
    .\scripts\install-driver.ps1 -DriverDirectory .\driver
    ```
 
-5. Start `panel\MiraboxEmulator.exe`, wait for the **“ГОТОВО” (ready)** status, and then launch Stream Dock. If the installer requests a restart, complete it before starting the panel.
+5. Start `panel\MirageDeck.exe`, wait for the **“ГОТОВО” (ready)** status, and then launch Stream Dock. If the installer requests a restart, complete it before starting the panel.
 
-The artifact also contains a detailed `START-HERE.md`. GitHub Actions artifacts are retained for 30 days; the source ZIP from the **Code** menu is not a ready-to-run build.
+`install-driver.ps1` runs verification again before changing the system; the separate `verify-package.ps1` command lets you inspect the result first. The artifact also contains a detailed `START-HERE.md`. GitHub Actions artifacts are retained for 30 days; the source ZIP from the **Code** menu is not a ready-to-run build.
 
 ### Build from source
 
@@ -88,9 +88,12 @@ Run in **Developer PowerShell for VS 2022**:
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build.ps1 Debug
 dotnet run --project .\test\Mirabox.Emulator.Core.Tests -c Release
-.\scripts\install-driver.ps1 -DriverDirectory .\driver\x64\Debug
+$certificate = Get-ChildItem .\driver\x64\Debug -Filter *.cer -Recurse | Select-Object -First 1
+.\scripts\install-driver.ps1 -DriverDirectory .\driver\x64\Debug -TestCertificatePath $certificate.FullName
 dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 ```
+
+The certificate path is explicit for local builds; the installer never imports an arbitrary `.cer` merely because it is next to the INF.
 
 ## Controls
 
@@ -131,7 +134,7 @@ flowchart LR
 - Only the global **N4ProE `VID_5548&PID_1021`** is supported. The mainland-China PID `1008` variant and other Mirabox models use different profiles.
 - Compatibility may depend on the Stream Dock version. Unknown commands are safely returned as `UnknownCommandUpdate`, but their behavior is not implemented yet.
 - The driver emulates the HID function, not the physical composite device's USB topology or USB descriptors. Software that validates the USB parent may not discover MirageDeck.
-- Public packages currently use a locally trusted self-signed certificate. Test Mode is not required for the current UMDF driver, but enterprise WDAC/App Control policies may still reject the package. Distribution without adding a certificate to the system trust stores requires a release signature already trusted by Windows, such as Microsoft attestation/WHQL.
+- GitHub Actions publishes only a development artifact with a locally trusted self-signed certificate. A public release that does not add a custom root certificate must use the current applicable Microsoft Hardware Developer Program process (for example, HLK/WHQL or attestation signing when the target scenario meets Microsoft's current eligibility rules).
 - The project is tested on Windows 11 x64; other Windows versions and architectures are not currently supported targets.
 
 ## Uninstall
@@ -142,10 +145,16 @@ Run in an elevated PowerShell window:
 .\scripts\uninstall-driver.ps1
 ```
 
-The script removes the virtual device and every certificate with the project-specific subject `CN=Mirabox HID Emulator Test` from `Root` and `TrustedPublisher`. To intentionally retain the certificates:
+The script removes the virtual device and only the current package certificate by its exact SHA-1 thumbprint from `PACKAGE-INFO.json`; certificates with a similar subject are not touched. To intentionally retain that certificate:
 
 ```powershell
 .\scripts\uninstall-driver.ps1 -KeepTestCertificate
+```
+
+The driver remains in the Driver Store by default. To remove it explicitly:
+
+```powershell
+.\scripts\uninstall-driver.ps1 -RemoveDriverPackage
 ```
 
 ## Roadmap
@@ -158,8 +167,14 @@ The script removes the virtual device and every certificate with the project-spe
 
 Found a bug? Open an [issue](https://github.com/Nekit678/MiraboxHIDEmulator/issues) and include your Windows version, Stream Dock version, reproduction steps, and a HID trace when possible. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for guidance on investigating unknown packets.
 
-## Acknowledgements and legal notice
+## Legal and interoperability notice
 
-The device profile is based on the public [StreamDock Device SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK) and a verified implementation of the 293-family protocol. The driver layer is based on Microsoft's `vhidmini2` sample; files under [`driver/`](driver/) are distributed under the MS-PL terms in [`driver/LICENSE-MS-PL`](driver/LICENSE-MS-PL).
+MirageDeck is an independent interoperability and testing project. It is not affiliated with, authorized by, endorsed by, or sponsored by Mirabox, HOTSPOTEK, Microsoft, or USB-IF.
 
-MirageDeck is an independent project and is not affiliated with Mirabox, HOTSPOTEK, or Microsoft. Product names and trademarks belong to their respective owners.
+MirageDeck implements a virtual HID device compatible with selected observable behavior of the Mirabox Stream Dock N4 Pro. Emulated identifiers such as `VID 5548 / PID 1021`, firmware-version strings, and device strings are exposed only where required for software compatibility. They are not assigned to MirageDeck and do not indicate ownership, authorization, endorsement, or USB-IF certification. MirageDeck does not use the USB logo and is not presented as a physical USB product.
+
+MirageDeck is intended for legitimate development, testing, accessibility, research, and interoperability. The distribution does not include Mirabox firmware, Stream Dock binaries, private signing keys, confidential documentation, or extracted proprietary assets.
+
+Mirabox, Stream Dock, N4 Pro, Microsoft, Windows, USB, and other names or marks are the property of their respective owners and are used only to identify compatibility or third-party component origins.
+
+Original MirageDeck code is distributed under the [MIT License](LICENSE), except for specifically identified derivative files. `driver/vhidmini.c`, `driver/vhidmini.h`, and `driver/util.c` contain portions of Microsoft's `vhidmini2` sample and are distributed under the [MS-PL](driver/LICENSE-MS-PL). See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for complete notices.

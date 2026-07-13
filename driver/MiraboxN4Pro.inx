@@ -61,7 +61,7 @@ ServiceBinary="%13%\MiraboxN4Pro.dll"
 MiraboxN4Pro.dll
 
 [Strings]
-Provider="Mirabox HID Emulator"
-Manufacturer="Mirabox HID Emulator"
-DiskName="Mirabox N4 Pro virtual HID installation media"
-DeviceDesc="Virtual Mirabox Stream Dock N4 Pro Global"
+Provider="MirageDeck Project"
+Manufacturer="MirageDeck Project"
+DiskName="MirageDeck virtual HID installation media"
+DeviceDesc="MirageDeck Virtual HID compatible with Mirabox N4 Pro"

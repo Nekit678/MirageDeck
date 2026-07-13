@@ -6,7 +6,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
-    <AssemblyName>MiraboxEmulator</AssemblyName>
+    <AssemblyName>MirageDeck</AssemblyName>
+    <Description>Independent N4 Pro-compatible virtual HID panel for development and interoperability testing.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Mirabox.Emulator.Core\Mirabox.Emulator.Core.csproj" />

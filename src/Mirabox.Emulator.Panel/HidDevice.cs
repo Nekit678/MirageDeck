@@ -83,7 +83,7 @@ internal sealed class HidDevice : IDisposable
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
-        throw new IOException("Виртуальный Mirabox N4 Pro Global (5548:1021) не найден.");
+        throw new IOException("MirageDeck Virtual HID с N4 Pro-совместимым профилем 5548:1021 не найден.");
     }
 
     public void InjectInput(ReadOnlySpan<byte> report)

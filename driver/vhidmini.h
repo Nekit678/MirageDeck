@@ -1,3 +1,17 @@
+/*++
+
+Copyright (C) Microsoft Corporation, All Rights Reserved.
+
+Portions of this file are derived from the Microsoft vhidmini2 sample
+and are licensed under the Microsoft Public License (MS-PL).
+See LICENSE-MS-PL.
+
+Modifications Copyright (c) 2026 Nikita Rybakov.
+
+Module Name:
+    vhidmini.h
+
+--*/
 #pragma once
 
 #include <windows.h>

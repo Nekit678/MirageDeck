@@ -1,8 +1,20 @@
-/*
- * Virtual Mirabox N4 Pro HID minidriver.
- * The WDF/HID request plumbing is derived from Microsoft's vhidmini2 sample
- * and remains available under the Microsoft Public License (see LICENSE-MS-PL).
- */
+/*++
+
+Copyright (C) Microsoft Corporation, All Rights Reserved.
+
+Portions of this file are derived from the Microsoft vhidmini2 sample
+and are licensed under the Microsoft Public License (MS-PL).
+See LICENSE-MS-PL.
+
+Modifications Copyright (c) 2026 Nikita Rybakov.
+
+Module Name:
+    vhidmini.c
+
+Purpose:
+    Virtual HID minidriver used by MirageDeck for interoperability testing.
+
+--*/
 #include "vhidmini.h"
 
 #define N4PRO_VID     0x5548

@@ -3,7 +3,7 @@ namespace Mirabox.Emulator.Core;
 public static class N4ProProfile
 {
     public const ushort VendorId = 0x5548;
-    // 0x1021 is the official global/English N4ProE variant. 0x1008 is the
+    // 0x1021 is the global/English N4ProE variant. 0x1008 is the
     // mainland-China model and is intentionally rejected by global Stream Dock.
     public const ushort ProductId = 0x1021;
     public const ushort UsagePage = 0xFFA0;

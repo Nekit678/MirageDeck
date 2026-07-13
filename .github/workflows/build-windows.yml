@@ -11,6 +11,9 @@ on:
       - "src/**"
       - "test/**"
       - "Directory.Build.props"
+      - "DISTRIBUTION.md"
+      - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
       - "packages.config"
   pull_request:
     paths:
@@ -20,6 +23,9 @@ on:
       - "src/**"
       - "test/**"
       - "Directory.Build.props"
+      - "DISTRIBUTION.md"
+      - "LICENSE"
+      - "THIRD_PARTY_NOTICES.md"
       - "packages.config"
 
 permissions:
@@ -100,12 +106,12 @@ jobs:
           ./scripts/package-ci.ps1
           -DriverSearchRoot ./driver
           -PanelPublishDirectory ./artifacts/panel
-          -OutputDirectory ./artifacts/MiraboxHIDEmulator-win-x64
+          -OutputDirectory ./artifacts/MirageDeck-development-win-x64
 
-      - name: Upload ready-to-install package
+      - name: Upload development package
         uses: actions/upload-artifact@v4
         with:
-          name: MiraboxHIDEmulator-win-x64
-          path: artifacts/MiraboxHIDEmulator-win-x64
+          name: MirageDeck-development-win-x64
+          path: artifacts/MirageDeck-development-win-x64
           if-no-files-found: error
           retention-days: 30
