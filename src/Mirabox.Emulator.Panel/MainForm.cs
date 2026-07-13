@@ -9,9 +9,9 @@ internal sealed class MainForm : Form
     private readonly DeviceSurface _surface = new() { Dock = DockStyle.Fill };
     private readonly StatusBanner _status = new() { Dock = DockStyle.Bottom, Height = 64 };
     private readonly MiraboxProtocolDecoder _decoder = new();
-    private readonly TouchModeSynchronizer _touchModeSynchronizer = new();
     private readonly CancellationTokenSource _shutdown = new();
     private HidDevice? _device;
+    private bool _hasProtocolTouchMode;
 
     public MainForm()
     {
@@ -26,7 +26,6 @@ internal sealed class MainForm : Form
         _status.SetStatus("Инициализация виртуального HID-устройства…", StatusKind.Connecting);
         _surface.InputGenerated += Inject;
         _surface.StatusChanged += message => SetStatus(message, StatusKind.Activity);
-        _surface.TouchModeSelected += _ => _touchModeSynchronizer.SelectLocally();
         Shown += (_, _) => Connect();
         FormClosed += (_, _) => _shutdown.Cancel();
     }
@@ -95,14 +94,14 @@ internal sealed class MainForm : Form
                 var secondary = N4ProProfile.SecondaryKeyForImageSlot(image.Slot);
                 if (secondary >= 0)
                 {
-                    ApplyInferredTouchMode(touchBar: false);
+                    if (!_hasProtocolTouchMode) SetTouchMode(touchBar: false);
                     _surface.SetSecondaryImage(secondary, DecodeImage(image.EncodedImage));
                     SetStatus($"Изображение touch-кнопки {secondary + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
                 }
             }
             break;
         case BackgroundUpdate background:
-            ApplyInferredTouchMode(touchBar: true);
+            if (!_hasProtocolTouchMode) SetTouchMode(touchBar: true);
             _surface.SetBackground(DecodeImage(background.EncodedImage));
             SetStatus($"Фон обновлён: {background.EncodedImage.Length:N0} байт", StatusKind.Activity);
             break;
@@ -123,15 +122,10 @@ internal sealed class MainForm : Form
             SetStatus("Экран включён", StatusKind.Success);
             break;
         case TouchModeUpdate mode:
-            SetTouchMode(_touchModeSynchronizer.ObserveProtocolMode(mode.TouchBar));
+            _hasProtocolTouchMode = true;
+            SetTouchMode(mode.TouchBar);
             break;
         }
-    }
-
-    private void ApplyInferredTouchMode(bool touchBar)
-    {
-        if (_touchModeSynchronizer.ObserveLayer(touchBar) is { } mode)
-            SetTouchMode(mode);
     }
 
     private void SetTouchMode(bool touchBar) =>

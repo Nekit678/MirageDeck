@@ -8,16 +8,14 @@ internal sealed class DeviceSurface : Control
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
     // Mouse clicks naturally drift by a few pixels. Keep that jitter a tap;
-    // scrolling starts only after a deliberate movement.
+    // gesture handling starts only after a deliberate movement.
     private const int TouchDragThreshold = 8;
-    private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
     private readonly Image?[] _keys = new Image?[10];
     private readonly Image?[] _secondaryKeys = new Image?[4];
     private readonly RectangleF[] _keyRects = new RectangleF[10];
     private readonly RectangleF[] _knobRects = new RectangleF[4];
-    private readonly System.Windows.Forms.Timer _touchReportTimer = new() { Interval = TouchReportIntervalMs };
     private RectangleF _touchRect;
     private int _activeKey = -1;
     private int _activeKnob = -1;
@@ -26,16 +24,12 @@ internal sealed class DeviceSurface : Control
     private int _hoverKnob = -1;
     private int _hoverSecondary = -1;
     private Point _touchStart;
-    private Point? _pendingTouchLocation;
-    private Point? _lastTouchLocation;
-    private long _lastTouchReportAt;
     private bool _touching;
     private bool _hoverTouch;
     private TouchDisplayMode _touchMode = TouchDisplayMode.Button;
 
     public event Action<byte[], string>? InputGenerated;
     public event Action<string>? StatusChanged;
-    public event Action<TouchDisplayMode>? TouchModeSelected;
     public byte Brightness { get; set; } = 100;
     public Image? BackgroundImageValue { get; private set; }
     public TouchDisplayMode TouchMode => _touchMode;
@@ -47,7 +41,6 @@ internal sealed class DeviceSurface : Control
         ForeColor = Palette.PrimaryText;
         MinimumSize = new Size(700, 430);
         SetStyle(ControlStyles.Selectable | ControlStyles.ResizeRedraw, true);
-        _touchReportTimer.Tick += (_, _) => FlushPendingTouch();
     }
 
     public void SetKeyImage(int index, Image image)
@@ -312,8 +305,8 @@ internal sealed class DeviceSurface : Control
     {
         using var font = new Font(Font.FontFamily, Math.Max(7f, 8.5f * scale), FontStyle.Regular, GraphicsUnit.Pixel);
         var hint = _touchMode == TouchDisplayMode.Button
-            ? "Button Mode: индикаторы энкодеров  •  свайп ↑ — Touchbar  •  колесо — вращение"
-            : "Touchbar: тап — действие  •  свайп ↔ — прокрутка  •  свайп ↓ — Button Mode";
+            ? "Button Mode: индикаторы энкодеров  •  свайп ↔ — страница  •  режим — в Stream Dock"
+            : "Touchbar: тап — действие  •  свайп ↔ — прокрутка  •  режим — в Stream Dock";
         TextRenderer.DrawText(graphics, hint, font,
             Rectangle.Round(rect), Palette.MutedText,
             TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
@@ -350,9 +343,6 @@ internal sealed class DeviceSurface : Control
             }
         if (_touchRect.Contains(e.Location))
         {
-            _touchReportTimer.Stop();
-            _pendingTouchLocation = null;
-            _lastTouchLocation = null;
             _touching = true;
             _touchStart = e.Location;
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
@@ -370,9 +360,6 @@ internal sealed class DeviceSurface : Control
                 UpdateHover(e.Location);
                 return;
             }
-            if (_touchMode == TouchDisplayMode.TouchBar &&
-                (_lastTouchLocation is not null || StartHorizontalTouchDrag(e.Location)))
-                EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
     }
@@ -400,8 +387,6 @@ internal sealed class DeviceSurface : Control
         }
         if (_touching && !TrySwitchTouchMode(e.Location))
         {
-            if (_touchMode == TouchDisplayMode.TouchBar)
-                FlushPendingTouch();
             var deltaX = e.X - _touchStart.X;
             var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
             if (horizontalSwipe)
@@ -412,12 +397,9 @@ internal sealed class DeviceSurface : Control
             {
                 Emit(InputReportFactory.SecondaryTap(_activeSecondary), $"Функция энкодера {_activeSecondary + 1}");
             }
-            else if (_touchMode == TouchDisplayMode.TouchBar &&
-                     _lastTouchLocation is null && !HasTouchDragStarted(e.Location))
+            else if (_touchMode == TouchDisplayMode.TouchBar && !HasTouchDragStarted(e.Location))
             {
-                // A tap is emitted on release. Sending it in MouseDown makes
-                // sliders and scrollable modules jump before a drag begins.
-                EmitTouch(e.Location, force: true);
+                EmitTouch(e.Location);
             }
             _touching = false;
             _activeSecondary = -1;
@@ -459,9 +441,6 @@ internal sealed class DeviceSurface : Control
         _touchMode = mode;
         _activeSecondary = -1;
         _hoverSecondary = -1;
-        _pendingTouchLocation = null;
-        _lastTouchLocation = null;
-        _touchReportTimer.Stop();
         StatusChanged?.Invoke(mode == TouchDisplayMode.Button
             ? "Button Mode: экран связан с четырьмя энкодерами"
             : "Touchbar Mode: экран принимает координатные касания");
@@ -476,14 +455,11 @@ internal sealed class DeviceSurface : Control
         if (Math.Abs(deltaY) <= threshold || Math.Abs(deltaY) <= Math.Abs(deltaX))
             return false;
 
-        var mode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
-        var changed = _touchMode != mode;
-        SetTouchMode(mode);
-        _touchReportTimer.Stop();
-        _pendingTouchLocation = null;
+        var requestedMode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
         _touching = false;
         _activeSecondary = -1;
-        if (changed) TouchModeSelected?.Invoke(mode);
+        if (_touchMode != requestedMode)
+            StatusChanged?.Invoke("Режим выбирается в Stream Dock: вертикальный свайп не имеет отдельного HID-кода");
         return true;
     }
 
@@ -500,52 +476,14 @@ internal sealed class DeviceSurface : Control
         return deltaX * deltaX + deltaY * deltaY >= TouchDragThreshold * TouchDragThreshold;
     }
 
-    private bool StartHorizontalTouchDrag(Point location)
+    private void EmitTouch(Point location)
     {
-        var deltaX = location.X - _touchStart.X;
-        var deltaY = location.Y - _touchStart.Y;
-        if (!HasTouchDragStarted(location) || Math.Abs(deltaX) < Math.Abs(deltaY))
-            return false;
-
-        // Seed the gesture at its actual origin only after it has been
-        // classified as a drag. Stream Dock then computes the first delta from
-        // the press point instead of jumping to the first moved coordinate.
-        EmitTouch(_touchStart, force: true);
-        return true;
-    }
-
-    private void EmitTouch(Point location, bool force = false)
-    {
-        if (_lastTouchLocation == location)
-        {
-            _pendingTouchLocation = null;
-            return;
-        }
-
-        var now = Environment.TickCount64;
-        if (!force && now - _lastTouchReportAt < TouchReportIntervalMs)
-        {
-            // MouseMove may run much faster than the HID consumer. Retain only
-            // the newest point so stale coordinates cannot make scrolling lag.
-            _pendingTouchLocation = location;
-            _touchReportTimer.Start();
-            return;
-        }
-
-        _touchReportTimer.Stop();
-        _pendingTouchLocation = null;
-        _lastTouchLocation = location;
-        _lastTouchReportAt = now;
-        var x = (ushort)Math.Clamp((location.X - _touchRect.Left) / _touchRect.Width * LogicalWidth, 0, LogicalWidth - 1);
-        var y = (ushort)Math.Clamp((location.Y - _touchRect.Top) / _touchRect.Height * LogicalHeight, 0, LogicalHeight - 1);
+        // Stream Dock rotates N4 Pro display frames by 180 degrees before
+        // upload. The physical touch controller uses that same raw orientation,
+        // so UI coordinates must be mirrored to emulate hardware coordinates.
+        var x = (ushort)Math.Clamp((_touchRect.Right - location.X) / _touchRect.Width * LogicalWidth, 0, LogicalWidth - 1);
+        var y = (ushort)Math.Clamp((_touchRect.Bottom - location.Y) / _touchRect.Height * LogicalHeight, 0, LogicalHeight - 1);
         Emit(InputReportFactory.Touch(x, y), $"Touch: {x}, {y}");
-    }
-
-    private void FlushPendingTouch()
-    {
-        _touchReportTimer.Stop();
-        if (_pendingTouchLocation is { } location)
-            EmitTouch(location, force: true);
     }
 
     private void Emit(byte[] report, string description) => InputGenerated?.Invoke(report, description);
@@ -557,7 +495,6 @@ internal sealed class DeviceSurface : Control
     {
         if (disposing)
         {
-            _touchReportTimer.Dispose();
             foreach (var image in _keys) image?.Dispose();
             foreach (var image in _secondaryKeys) image?.Dispose();
             BackgroundImageValue?.Dispose();
