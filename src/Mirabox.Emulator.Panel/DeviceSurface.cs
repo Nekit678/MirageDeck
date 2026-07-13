@@ -9,6 +9,7 @@ internal sealed class DeviceSurface : Control
     // becoming the first step of a scrolling gesture.
     private const int TouchDragThreshold = 8;
     private const int TouchReportIntervalMs = 16;
+    private const int TouchTapReportCount = 2;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
     private readonly Image?[] _keys = new Image?[10];
@@ -409,10 +410,7 @@ internal sealed class DeviceSurface : Control
                 if (_touchDragStarted)
                     EmitTouchDrag(e.Location, force: true);
                 else
-                    // A tap must stay absolute so Stream Dock can select the
-                    // widget under the pointer. Repeating a point is valid and
-                    // is required for two consecutive taps on the same widget.
-                    EmitTouchAbsolute(_touchStart, force: true, repeat: true);
+                    EmitTouchTap(_touchStart);
             }
             else
             {
@@ -537,8 +535,17 @@ internal sealed class DeviceSurface : Control
             Math.Clamp(_touchDragOrigin.Y + (int)deltaY, 0, N4ProProfile.TouchHeight - 1));
     }
 
-    private void EmitTouchAbsolute(Point location, bool force = false, bool repeat = false) =>
-        EmitTouchPoint(ToLogicalTouchPoint(location), force, repeat);
+    private void EmitTouchTap(Point location)
+    {
+        // ARX has no contact phase. A stationary physical touch therefore
+        // arrives as a short run of identical samples. Keep the coordinate
+        // already known to Stream Dock so a tap after a drag cannot become a
+        // synthetic movement from the previous contact, then repeat it so the
+        // current touchbar action receives a stationary press.
+        var touchPoint = _lastTouchPoint ?? ToLogicalTouchPoint(location);
+        for (var i = 0; i < TouchTapReportCount; i++)
+            EmitTouchPoint(touchPoint, force: true, repeat: true);
+    }
 
     private void EmitTouchDrag(Point location, bool force = false) =>
         EmitTouchPoint(ToDragTouchPoint(location), force);
