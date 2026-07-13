@@ -26,6 +26,7 @@ typedef struct _DEVICE_CONTEXT {
     ULONG OutputCount;
     ULONG OutputSequence;
     ULONG TransferBytesRemaining;
+    USHORT TouchReleaseX;
     ULONG LastWriteStage;
     NTSTATUS LastWriteStatus;
     ULONG LastWriteInputLength;

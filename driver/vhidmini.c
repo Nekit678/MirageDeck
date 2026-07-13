@@ -41,6 +41,7 @@ static NTSTATUS GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetInputReport(WDFREQUEST Request);
 static NTSTATUS GetString(WDFREQUEST Request);
 static VOID ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload);
+static VOID TrackTouchContactLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload);
 static VOID EnqueueInputLocked(PDEVICE_CONTEXT Context, const UCHAR* Report);
 static VOID CompletePendingRead(PDEVICE_CONTEXT Context);
 static NTSTATUS CopyInputReport(WDFREQUEST Request, const UCHAR* Payload);
@@ -265,6 +266,7 @@ SubmitInput(PDEVICE_CONTEXT Context, const UCHAR* Payload)
     NTSTATUS status;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
+    TrackTouchContactLocked(Context, Payload);
     status = WdfIoQueueRetrieveNextRequest(Context->ReadQueue, &readRequest);
     if (!NT_SUCCESS(status)) {
         EnqueueInputLocked(Context, Payload);
@@ -278,6 +280,25 @@ SubmitInput(PDEVICE_CONTEXT Context, const UCHAR* Payload)
         status = STATUS_SUCCESS;
     }
     return status;
+}
+
+static VOID
+TrackTouchContactLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload)
+{
+    USHORT x;
+
+    if (Payload[0] != 'A' || Payload[1] != 'C' || Payload[2] != 'K'
+        || Payload[3] != 0 || Payload[4] != 0
+        || Payload[5] != 'O' || Payload[6] != 'K'
+        || Payload[9] != 0)
+        return;
+
+    x = ((USHORT)Payload[11] << 8) | Payload[12];
+    if (Payload[10] == 1) {
+        Context->TouchReleaseX = 0;
+    } else if (Payload[10] == 0 && x != 0) {
+        Context->TouchReleaseX = x;
+    }
 }
 
 static ULONG
@@ -355,6 +376,14 @@ ProcessProtocolLocked(PDEVICE_CONTEXT Context, const UCHAR* Payload)
         RtlZeroMemory(ack, sizeof(ack));
         ack[0] = 'A'; ack[1] = 'C'; ack[2] = 'K';
         ack[5] = 'O'; ack[6] = 'K'; ack[9] = 0xFF;
+        /* Stream Dock delays the touchbar key-up event by 50 ms and keeps its
+         * X coordinate in parser state. A redraw ACK can arrive during that
+         * window; preserving the last released X prevents the ACK padding
+         * from clearing the pending key-up target. */
+        if (Context->TouchReleaseX != 0) {
+            ack[11] = (UCHAR)(Context->TouchReleaseX >> 8);
+            ack[12] = (UCHAR)Context->TouchReleaseX;
+        }
         EnqueueInputLocked(Context, ack);
     }
 }
