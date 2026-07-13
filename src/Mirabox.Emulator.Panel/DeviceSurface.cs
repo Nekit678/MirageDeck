@@ -24,10 +24,10 @@ internal sealed class DeviceSurface : Control
     private int _hoverKnob = -1;
     private int _hoverSecondary = -1;
     private Point _touchStart;
+    private Point _touchDragOrigin;
     private Point? _pendingTouchPoint;
     private Point? _lastTouchPoint;
     private long _lastTouchReportAt;
-    private ushort _touchSequence;
     private bool _touching;
     private bool _touchDragStarted;
     private bool _hoverTouch;
@@ -351,13 +351,14 @@ internal sealed class DeviceSurface : Control
         {
             _touchReportTimer.Stop();
             _pendingTouchPoint = null;
-            _lastTouchPoint = null;
             _touching = true;
             _touchDragStarted = false;
             _touchStart = e.Location;
+            // ARX has no Down/Up marker. Anchor a new drag at the last point
+            // already known to Stream Dock so a separate contact cannot create
+            // one large synthetic movement between the two screen positions.
+            _touchDragOrigin = _lastTouchPoint ?? ToLogicalTouchPoint(e.Location);
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
-            if (_touchMode == TouchDisplayMode.TouchBar)
-                EmitTouch(e.Location, TouchPhase.Down, force: true);
             Invalidate();
         }
     }
@@ -374,7 +375,7 @@ internal sealed class DeviceSurface : Control
             }
             if (_touchMode == TouchDisplayMode.TouchBar &&
                 (_touchDragStarted || StartHorizontalTouchDrag(e.Location)))
-                EmitTouch(e.Location, TouchPhase.Move);
+                EmitTouchDrag(e.Location);
         }
         UpdateHover(e.Location);
     }
@@ -405,7 +406,13 @@ internal sealed class DeviceSurface : Control
             if (_touchMode == TouchDisplayMode.TouchBar)
             {
                 FlushPendingTouch();
-                EmitTouch(_touchDragStarted ? e.Location : _touchStart, TouchPhase.Up, force: true);
+                if (_touchDragStarted)
+                    EmitTouchDrag(e.Location, force: true);
+                else
+                    // A tap must stay absolute so Stream Dock can select the
+                    // widget under the pointer. Repeating a point is valid and
+                    // is required for two consecutive taps on the same widget.
+                    EmitTouchAbsolute(_touchStart, force: true, repeat: true);
             }
             else
             {
@@ -454,8 +461,6 @@ internal sealed class DeviceSurface : Control
     public void SetTouchMode(TouchDisplayMode mode)
     {
         if (_touchMode == mode) return;
-        if (_touching && _touchMode == TouchDisplayMode.TouchBar)
-            EmitTouch(_touchStart, TouchPhase.Cancel, force: true);
         _touchMode = mode;
         _touching = false;
         _activeSecondary = -1;
@@ -480,12 +485,10 @@ internal sealed class DeviceSurface : Control
 
         var requestedMode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
         if (_touchMode == TouchDisplayMode.TouchBar)
-        {
             FlushPendingTouch();
-            EmitTouch(location, TouchPhase.Cancel, force: true);
-        }
         _touchReportTimer.Stop();
         _pendingTouchPoint = null;
+        _lastTouchPoint = null;
         _touching = false;
         _touchDragStarted = false;
         _activeSecondary = -1;
@@ -515,6 +518,8 @@ internal sealed class DeviceSurface : Control
             return false;
 
         _touchDragStarted = true;
+        if (_lastTouchPoint is null)
+            EmitTouchPoint(_touchDragOrigin, force: true);
         return true;
     }
 
@@ -523,19 +528,31 @@ internal sealed class DeviceSurface : Control
             Math.Clamp((int)((location.X - _touchRect.Left) / _touchRect.Width * N4ProProfile.TouchWidth), 0, N4ProProfile.TouchWidth - 1),
             Math.Clamp((int)((location.Y - _touchRect.Top) / _touchRect.Height * N4ProProfile.TouchHeight), 0, N4ProProfile.TouchHeight - 1));
 
-    private void EmitTouch(Point location, TouchPhase phase, bool force = false) =>
-        EmitTouchPoint(ToLogicalTouchPoint(location), phase, force);
-
-    private void EmitTouchPoint(Point touchPoint, TouchPhase phase, bool force = false)
+    private Point ToDragTouchPoint(Point location)
     {
-        if (phase == TouchPhase.Move && !force && _lastTouchPoint == touchPoint)
+        var deltaX = (location.X - _touchStart.X) / _touchRect.Width * N4ProProfile.TouchWidth;
+        var deltaY = (location.Y - _touchStart.Y) / _touchRect.Height * N4ProProfile.TouchHeight;
+        return new Point(
+            Math.Clamp(_touchDragOrigin.X + (int)deltaX, 0, N4ProProfile.TouchWidth - 1),
+            Math.Clamp(_touchDragOrigin.Y + (int)deltaY, 0, N4ProProfile.TouchHeight - 1));
+    }
+
+    private void EmitTouchAbsolute(Point location, bool force = false, bool repeat = false) =>
+        EmitTouchPoint(ToLogicalTouchPoint(location), force, repeat);
+
+    private void EmitTouchDrag(Point location, bool force = false) =>
+        EmitTouchPoint(ToDragTouchPoint(location), force);
+
+    private void EmitTouchPoint(Point touchPoint, bool force = false, bool repeat = false)
+    {
+        if (!repeat && _lastTouchPoint == touchPoint)
         {
             _pendingTouchPoint = null;
             return;
         }
 
         var now = Environment.TickCount64;
-        if (phase == TouchPhase.Move && !force && now - _lastTouchReportAt < TouchReportIntervalMs)
+        if (!force && now - _lastTouchReportAt < TouchReportIntervalMs)
         {
             // MouseMove can outpace the HID consumer. Keep only the newest
             // coordinate so scrolling stays responsive instead of replaying a
@@ -551,16 +568,14 @@ internal sealed class DeviceSurface : Control
         _lastTouchReportAt = now;
         var x = (ushort)touchPoint.X;
         var y = (ushort)touchPoint.Y;
-        var timestamp = unchecked((uint)now);
-        var sequence = ++_touchSequence;
-        Emit(InputReportFactory.Touch(x, y, phase, timestamp, sequence), $"Touch {phase}: {x}, {y}");
+        Emit(InputReportFactory.Touch(x, y), $"Touch ARX: {x}, {y}");
     }
 
     private void FlushPendingTouch()
     {
         _touchReportTimer.Stop();
         if (_pendingTouchPoint is { } touchPoint)
-            EmitTouchPoint(touchPoint, TouchPhase.Move, force: true);
+            EmitTouchPoint(touchPoint, force: true);
     }
 
     private void Emit(byte[] report, string description) => InputGenerated?.Invoke(report, description);

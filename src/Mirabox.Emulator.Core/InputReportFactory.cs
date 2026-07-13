@@ -1,14 +1,4 @@
-using System.Buffers.Binary;
-
 namespace Mirabox.Emulator.Core;
-
-public enum TouchPhase : byte
-{
-    Down = 0,
-    Move = 1,
-    Up = 2,
-    Cancel = 3,
-}
 
 public static class InputReportFactory
 {
@@ -47,21 +37,19 @@ public static class InputReportFactory
     }
 
     /// <summary>
-    /// N4 Pro touch contacts use a TP packet. Stream Dock uses the phase and
-    /// sequence fields to separate contacts; omitting them makes a new contact
-    /// look like a continuation from the previous coordinate.
+    /// N4 Pro touch points use the ACK ARX packet documented by the official
+    /// Device SDK. The protocol carries coordinates only and has no contact
+    /// phase or sequence field.
     /// </summary>
-    public static byte[] Touch(ushort x, ushort y, TouchPhase phase, uint timestamp, ushort sequence)
+    public static byte[] Touch(ushort x, ushort y)
     {
-        if ((byte)phase > (byte)TouchPhase.Cancel) throw new ArgumentOutOfRangeException(nameof(phase));
         var report = new byte[N4ProProfile.InputReportLength];
-        report[0] = (byte)'T';
-        report[1] = (byte)'P';
-        report[2] = (byte)phase;
-        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(4, 2), x);
-        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(6, 2), y);
-        BinaryPrimitives.WriteUInt32BigEndian(report.AsSpan(8, 4), timestamp);
-        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(12, 2), sequence);
+        "ACK"u8.CopyTo(report);
+        "ARX"u8.CopyTo(report.AsSpan(4));
+        report[10] = (byte)(x >> 8);
+        report[11] = (byte)x;
+        report[12] = (byte)(y >> 8);
+        report[13] = (byte)y;
         return report;
     }
 

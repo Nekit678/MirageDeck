@@ -10,8 +10,8 @@ public static class N4ProProfile
     public const ushort Usage = 0x0001;
     public const int InputReportLength = 512;
     public const int OutputReportLength = 1024;
-    public const int TouchWidth = 1680;
-    public const int TouchHeight = 172;
+    public const int TouchWidth = 800;
+    public const int TouchHeight = 480;
 
     // UI key 0..9 is top-left to bottom-right. The firmware numbers its
     // two rows as 0x01..0x05 (top) and 0x06..0x0A (bottom).
