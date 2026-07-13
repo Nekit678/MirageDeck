@@ -1,4 +1,14 @@
+using System.Buffers.Binary;
+
 namespace Mirabox.Emulator.Core;
+
+public enum TouchPhase : byte
+{
+    Down = 0,
+    Move = 1,
+    Up = 2,
+    Cancel = 3,
+}
 
 public static class InputReportFactory
 {
@@ -36,39 +46,39 @@ public static class InputReportFactory
         return Event(N4ProProfile.SecondaryKeyCodes[index], 0);
     }
 
-    public static byte[] Touch(ushort x, ushort y)
+    /// <summary>
+    /// N4 Pro touch contacts use a TP packet. Stream Dock uses the phase and
+    /// sequence fields to separate contacts; omitting them makes a new contact
+    /// look like a continuation from the previous coordinate.
+    /// </summary>
+    public static byte[] Touch(ushort x, ushort y, TouchPhase phase, uint timestamp, ushort sequence)
     {
-        var report = Header("ARX");
-        report[10] = (byte)(x >> 8);
-        report[11] = (byte)x;
-        report[12] = (byte)(y >> 8);
-        report[13] = (byte)y;
+        if ((byte)phase > (byte)TouchPhase.Cancel) throw new ArgumentOutOfRangeException(nameof(phase));
+        var report = new byte[N4ProProfile.InputReportLength];
+        report[0] = (byte)'T';
+        report[1] = (byte)'P';
+        report[2] = (byte)phase;
+        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(4, 2), x);
+        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(6, 2), y);
+        BinaryPrimitives.WriteUInt32BigEndian(report.AsSpan(8, 4), timestamp);
+        BinaryPrimitives.WriteUInt16BigEndian(report.AsSpan(12, 2), sequence);
         return report;
     }
 
     private static byte[] Event(byte hardwareCode, byte state)
     {
-        var report = Header("OK");
+        var report = Header();
         report[9] = hardwareCode;
         report[10] = state;
         return report;
     }
 
-    private static byte[] Header(string response)
+    private static byte[] Header()
     {
         var report = new byte[N4ProProfile.InputReportLength];
         "ACK"u8.CopyTo(report);
-        if (response == "OK")
-        {
-            report[5] = (byte)'O';
-            report[6] = (byte)'K';
-        }
-        else
-        {
-            report[4] = (byte)'A';
-            report[5] = (byte)'R';
-            report[6] = (byte)'X';
-        }
+        report[5] = (byte)'O';
+        report[6] = (byte)'K';
         return report;
     }
 }

@@ -58,14 +58,23 @@ static void TestInputSecondaryTap()
 
 static void TestInputTouchPoint()
 {
-    var report = InputReportFactory.Touch(0x0123, 0x0456);
-    Equal((byte)'A', report[4]);
-    Equal((byte)'R', report[5]);
-    Equal((byte)'X', report[6]);
-    Equal((byte)0x01, report[10]);
-    Equal((byte)0x23, report[11]);
-    Equal((byte)0x04, report[12]);
-    Equal((byte)0x56, report[13]);
+    var report = InputReportFactory.Touch(0x0123, 0x0045, TouchPhase.Down, 0x01020304, 0x0506);
+    Equal((byte)'T', report[0]);
+    Equal((byte)'P', report[1]);
+    Equal((byte)TouchPhase.Down, report[2]);
+    Equal((byte)0x01, report[4]);
+    Equal((byte)0x23, report[5]);
+    Equal((byte)0x00, report[6]);
+    Equal((byte)0x45, report[7]);
+    Equal((byte)0x01, report[8]);
+    Equal((byte)0x02, report[9]);
+    Equal((byte)0x03, report[10]);
+    Equal((byte)0x04, report[11]);
+    Equal((byte)0x05, report[12]);
+    Equal((byte)0x06, report[13]);
+
+    var released = InputReportFactory.Touch(0x0123, 0x0045, TouchPhase.Up, 0x01020305, 0x0507);
+    Equal((byte)TouchPhase.Up, released[2]);
 }
 
 static void TestInputSwipe()
