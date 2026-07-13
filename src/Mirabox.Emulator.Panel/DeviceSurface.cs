@@ -7,7 +7,9 @@ internal sealed class DeviceSurface : Control
 {
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
-    private const int TouchDragThreshold = 3;
+    // Mouse clicks naturally drift by a few pixels. Keep that jitter a tap;
+    // scrolling starts only after a deliberate movement.
+    private const int TouchDragThreshold = 8;
     private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
@@ -33,6 +35,7 @@ internal sealed class DeviceSurface : Control
 
     public event Action<byte[], string>? InputGenerated;
     public event Action<string>? StatusChanged;
+    public event Action<TouchDisplayMode>? TouchModeSelected;
     public byte Brightness { get; set; } = 100;
     public Image? BackgroundImageValue { get; private set; }
     public TouchDisplayMode TouchMode => _touchMode;
@@ -368,7 +371,7 @@ internal sealed class DeviceSurface : Control
                 return;
             }
             if (_touchMode == TouchDisplayMode.TouchBar &&
-                (_lastTouchLocation is not null || HasHorizontalTouchDragStarted(e.Location)))
+                (_lastTouchLocation is not null || StartHorizontalTouchDrag(e.Location)))
                 EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
@@ -474,11 +477,13 @@ internal sealed class DeviceSurface : Control
             return false;
 
         var mode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
+        var changed = _touchMode != mode;
         SetTouchMode(mode);
         _touchReportTimer.Stop();
         _pendingTouchLocation = null;
         _touching = false;
         _activeSecondary = -1;
+        if (changed) TouchModeSelected?.Invoke(mode);
         return true;
     }
 
@@ -495,11 +500,18 @@ internal sealed class DeviceSurface : Control
         return deltaX * deltaX + deltaY * deltaY >= TouchDragThreshold * TouchDragThreshold;
     }
 
-    private bool HasHorizontalTouchDragStarted(Point location)
+    private bool StartHorizontalTouchDrag(Point location)
     {
         var deltaX = location.X - _touchStart.X;
         var deltaY = location.Y - _touchStart.Y;
-        return HasTouchDragStarted(location) && Math.Abs(deltaX) >= Math.Abs(deltaY);
+        if (!HasTouchDragStarted(location) || Math.Abs(deltaX) < Math.Abs(deltaY))
+            return false;
+
+        // Seed the gesture at its actual origin only after it has been
+        // classified as a drag. Stream Dock then computes the first delta from
+        // the press point instead of jumping to the first moved coordinate.
+        EmitTouch(_touchStart, force: true);
+        return true;
     }
 
     private void EmitTouch(Point location, bool force = false)

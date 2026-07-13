@@ -11,6 +11,9 @@ var tests = new (string Name, Action Run)[]
     ("input swipe packet", TestInputSwipe),
     ("button mode command", TestButtonMode),
     ("touchbar mode command", TestTouchBarMode),
+    ("local touch mode survives repeated layer", TestLocalTouchModeOverride),
+    ("application touch mode change clears local override", TestApplicationTouchModeChange),
+    ("protocol touch mode overrides local mode", TestProtocolTouchMode),
     ("brightness command", TestBrightness),
     ("fragmented key image", TestImage),
     ("background image", TestBackground),
@@ -92,6 +95,32 @@ static void TestTouchBarMode()
     packet[10] = (byte)'2';
     var update = Single<TouchModeUpdate>(new MiraboxProtocolDecoder().Push(packet));
     Equal(true, update.TouchBar);
+}
+
+static void TestLocalTouchModeOverride()
+{
+    var synchronizer = new TouchModeSynchronizer();
+    Equal(true, synchronizer.ObserveLayer(touchBar: true)!.Value);
+    synchronizer.SelectLocally();
+    True(synchronizer.ObserveLayer(touchBar: true) is null);
+}
+
+static void TestApplicationTouchModeChange()
+{
+    var synchronizer = new TouchModeSynchronizer();
+    Equal(true, synchronizer.ObserveLayer(touchBar: true)!.Value);
+    synchronizer.SelectLocally();
+    Equal(false, synchronizer.ObserveLayer(touchBar: false)!.Value);
+    Equal(true, synchronizer.ObserveLayer(touchBar: true)!.Value);
+}
+
+static void TestProtocolTouchMode()
+{
+    var synchronizer = new TouchModeSynchronizer();
+    Equal(true, synchronizer.ObserveLayer(touchBar: true)!.Value);
+    synchronizer.SelectLocally();
+    Equal(false, synchronizer.ObserveProtocolMode(touchBar: false));
+    True(synchronizer.ObserveLayer(touchBar: true) is null);
 }
 
 static void TestBrightness()
