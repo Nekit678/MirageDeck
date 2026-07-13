@@ -14,7 +14,7 @@
     <Company>MirageDeck Project</Company>
     <Product>MirageDeck</Product>
     <Copyright>Copyright (c) 2026 Nikita Rybakov</Copyright>
-    <RepositoryUrl>https://github.com/Nekit678/MiraboxHIDEmulator</RepositoryUrl>
+    <RepositoryUrl>https://github.com/Nekit678/MirageDeck</RepositoryUrl>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

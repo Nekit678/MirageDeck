@@ -35,9 +35,13 @@
     <ClCompile Include="util.c" />
     <ClInclude Include="vhidmini.h" />
     <ClInclude Include="common.h" />
-    <Inf Include="MiraboxN4Pro.inx" />
+    <Inf Include="MiraboxN4Pro.inx">
+      <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
+      <DateStamp>07/13/2026</DateStamp>
+      <SpecifyDriverDirectiveVersion>true</SpecifyDriverDirectiveVersion>
+      <TimeStamp>$(FileVersion)</TimeStamp>
+    </Inf>
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
-

@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml"><img alt="Build status" src="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml/badge.svg"></a>
+  <a href="https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml"><img alt="Build status" src="https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml/badge.svg"></a>
   <img alt="Windows 11 x64" src="https://img.shields.io/badge/Windows_11-x64-0078D4?logo=windows11&logoColor=white">
   <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white">
   <img alt="Release status" src="https://img.shields.io/badge/version-1.x%20early%20release-ffb500">
@@ -57,7 +57,7 @@ Stream Dock ◀──keys, encoders, gestures── virtual HID ◀── Mirage
 
 ### GitHub Actions development package
 
-1. Open **[Actions → Build Windows package](https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml)**.
+1. Open **[Actions → Build Windows package](https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml)**.
 2. Select the latest successful run and download the `MirageDeck-development-win-x64` artifact.
 3. Extract the ZIP completely into a dedicated directory.
 4. Open an elevated PowerShell window in the extracted package directory:
@@ -165,7 +165,7 @@ The driver remains in the Driver Store by default. To remove it explicitly:
 - streamline signed and versioned releases;
 - extend automated driver and UI testing.
 
-Found a bug? Open an [issue](https://github.com/Nekit678/MiraboxHIDEmulator/issues) and include your Windows version, Stream Dock version, reproduction steps, and a HID trace when possible. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for guidance on investigating unknown packets.
+Found a bug? Open an [issue](https://github.com/Nekit678/MirageDeck/issues) and include your Windows version, Stream Dock version, reproduction steps, and a HID trace when possible. See [`docs/PROTOCOL.md`](docs/PROTOCOL.md) for guidance on investigating unknown packets.
 
 ## Legal and interoperability notice
 

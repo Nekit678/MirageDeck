@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml"><img alt="Сборка" src="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml/badge.svg"></a>
+  <a href="https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml"><img alt="Сборка" src="https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml/badge.svg"></a>
   <img alt="Windows 11 x64" src="https://img.shields.io/badge/Windows_11-x64-0078D4?logo=windows11&logoColor=white">
   <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white">
   <img alt="Статус версии" src="https://img.shields.io/badge/version-1.x%20early%20release-ffb500">
@@ -57,7 +57,7 @@ Stream Dock ◀──клавиши, энкодеры, жесты── вирт
 
 ### Development-пакет из GitHub Actions
 
-1. Откройте **[Actions → Build Windows package](https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml)**.
+1. Откройте **[Actions → Build Windows package](https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml)**.
 2. Выберите последний успешный запуск и скачайте артефакт `MirageDeck-development-win-x64`.
 3. Полностью распакуйте ZIP в отдельную папку.
 4. Откройте PowerShell от имени администратора в папке пакета:
@@ -165,7 +165,7 @@ flowchart LR
 - упростить выпуск подписанных и версионированных сборок;
 - расширять автоматические тесты драйвера и интерфейса.
 
-Нашли ошибку? Создайте [issue](https://github.com/Nekit678/MiraboxHIDEmulator/issues) и приложите версию Windows, версию Stream Dock, шаги воспроизведения и, если возможно, HID-трассировку. Инструкция по исследованию неизвестных пакетов находится в [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+Нашли ошибку? Создайте [issue](https://github.com/Nekit678/MirageDeck/issues) и приложите версию Windows, версию Stream Dock, шаги воспроизведения и, если возможно, HID-трассировку. Инструкция по исследованию неизвестных пакетов находится в [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
 
 ## Правовая информация и совместимость
 
