@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" role="img" aria-labelledby="title description">
+  <title id="title">MirageDeck virtual panel preview</title>
+  <desc id="description">A faithful static preview of the MirageDeck Windows panel with ten LCD keys, a touch display, four encoders, and a connected HID status.</desc>
+  <defs>
+    <linearGradient id="window" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#17191e"/>
+      <stop offset="1" stop-color="#0d0e12"/>
+    </linearGradient>
+    <linearGradient id="device" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#34363d"/>
+      <stop offset="1" stop-color="#24262c"/>
+    </linearGradient>
+    <linearGradient id="touch" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#063c4c"/>
+      <stop offset="0.5" stop-color="#38256f"/>
+      <stop offset="1" stop-color="#722c50"/>
+    </linearGradient>
+    <linearGradient id="knob" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#737784"/>
+      <stop offset="1" stop-color="#4f535d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="24" flood-color="#000" flood-opacity=".5"/>
+    </filter>
+    <filter id="small-shadow" x="-25%" y="-25%" width="150%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000" flood-opacity=".6"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="800" fill="#0a0b0f"/>
+  <circle cx="1020" cy="50" r="340" fill="#3c2b78" opacity=".16"/>
+  <circle cx="145" cy="770" r="330" fill="#08798c" opacity=".13"/>
+
+  <g filter="url(#shadow)">
+    <rect x="100" y="62" width="1000" height="676" rx="20" fill="url(#window)" stroke="#3a3d45" stroke-width="2"/>
+    <path d="M120 62h960a20 20 0 0 1 20 20v54H100V82a20 20 0 0 1 20-20Z" fill="#22242a"/>
+    <line x1="100" y1="136" x2="1100" y2="136" stroke="#343740"/>
+    <rect x="126" y="87" width="24" height="24" rx="6" fill="#141519" stroke="#31d2ef" stroke-width="2"/>
+    <g fill="#31d2ef"><rect x="131" y="92" width="5" height="5" rx="1"/><rect x="140" y="92" width="5" height="5" rx="1"/><rect x="131" y="101" width="5" height="5" rx="1"/><rect x="140" y="101" width="5" height="5" rx="1"/></g>
+    <text x="170" y="107" fill="#eef0f4" font-family="Segoe UI, Arial, sans-serif" font-size="22">Mirabox N4 Pro — виртуальная панель</text>
+    <path d="M975 100h18" stroke="#c4c7cf" stroke-width="2"/>
+    <rect x="1019" y="91" width="17" height="15" fill="none" stroke="#c4c7cf" stroke-width="2"/>
+    <path d="M1063 91l18 18m0-18-18 18" stroke="#c4c7cf" stroke-width="2"/>
+
+    <rect x="150" y="166" width="900" height="472" rx="29" fill="url(#device)" stroke="#484b54" stroke-width="3"/>
+
+    <!-- LCD keys -->
+    <g filter="url(#small-shadow)" font-family="Segoe UI, Arial, sans-serif" font-weight="700" text-anchor="middle">
+      <g transform="translate(287 193)">
+        <rect width="108" height="96" rx="15" fill="#0b1118" stroke="#20c7e8" stroke-width="3"/>
+        <circle cx="54" cy="39" r="19" fill="#12a8c5" opacity=".22"/><path d="M44 49V29l21 10Z" fill="#58e2f5"/>
+        <text x="54" y="78" fill="#e8fbff" font-size="13">START</text>
+      </g>
+      <g transform="translate(417 193)">
+        <rect width="108" height="96" rx="15" fill="#111021" stroke="#8a66ff" stroke-width="3"/>
+        <rect x="36" y="25" width="36" height="28" rx="5" fill="#8a66ff" opacity=".28"/><circle cx="54" cy="39" r="8" fill="#b9a6ff"/>
+        <text x="54" y="78" fill="#f1edff" font-size="13">CAM</text>
+      </g>
+      <g transform="translate(547 193)">
+        <rect width="108" height="96" rx="15" fill="#18101b" stroke="#ff7185" stroke-width="3"/>
+        <rect x="45" y="22" width="18" height="36" rx="9" fill="#ff7185"/><path d="M36 44a18 18 0 0 0 36 0M54 62v10" fill="none" stroke="#ffd2d8" stroke-width="4" stroke-linecap="round"/>
+        <text x="54" y="86" fill="#fff0f2" font-size="13">MIC</text>
+      </g>
+      <g transform="translate(677 193)">
+        <rect width="108" height="96" rx="15" fill="#101817" stroke="#50c878" stroke-width="3"/>
+        <circle cx="54" cy="39" r="19" fill="#50c878" opacity=".24"/><path d="M44 39l7 7 15-17" fill="none" stroke="#7ff1a6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+        <text x="54" y="78" fill="#edfff3" font-size="13">LIVE</text>
+      </g>
+      <g transform="translate(807 193)">
+        <rect width="108" height="96" rx="15" fill="#18150d" stroke="#ffb500" stroke-width="3"/>
+        <path d="M39 48h8l11 9V22l-11 9h-8Z" fill="#ffd15a"/><path d="M66 32q12 7 0 14" fill="none" stroke="#ffd15a" stroke-width="4" stroke-linecap="round"/>
+        <text x="54" y="78" fill="#fff8e3" font-size="13">SOUND</text>
+      </g>
+
+      <g transform="translate(287 309)">
+        <rect width="108" height="96" rx="15" fill="#101217" stroke="#4e5668" stroke-width="3"/>
+        <text x="54" y="53" fill="#c8cedb" font-size="28">01</text><text x="54" y="78" fill="#8d94a3" font-size="12">SCENE</text>
+      </g>
+      <g transform="translate(417 309)">
+        <rect width="108" height="96" rx="15" fill="#101217" stroke="#4e5668" stroke-width="3"/>
+        <text x="54" y="53" fill="#c8cedb" font-size="28">02</text><text x="54" y="78" fill="#8d94a3" font-size="12">SCENE</text>
+      </g>
+      <g transform="translate(547 309)">
+        <rect width="108" height="96" rx="15" fill="#101217" stroke="#4e5668" stroke-width="3"/>
+        <text x="54" y="53" fill="#c8cedb" font-size="28">03</text><text x="54" y="78" fill="#8d94a3" font-size="12">SCENE</text>
+      </g>
+      <g transform="translate(677 309)">
+        <rect width="108" height="96" rx="15" fill="#101217" stroke="#4e5668" stroke-width="3"/>
+        <text x="54" y="53" fill="#c8cedb" font-size="28">04</text><text x="54" y="78" fill="#8d94a3" font-size="12">SCENE</text>
+      </g>
+      <g transform="translate(807 309)">
+        <rect width="108" height="96" rx="15" fill="#101217" stroke="#4e5668" stroke-width="3"/>
+        <path d="M39 30l30 30m0-30L39 60" stroke="#ff7185" stroke-width="7" stroke-linecap="round"/><text x="54" y="83" fill="#ffced5" font-size="12">STOP</text>
+      </g>
+    </g>
+
+    <!-- Touch display -->
+    <rect x="290" y="431" width="622" height="76" rx="14" fill="url(#touch)" stroke="#666a76" stroke-width="3"/>
+    <g stroke="#a9ecfa" stroke-width="3" fill="none" opacity=".9">
+      <path d="M329 479h34l9-18 16 30 14-40 13 28h44"/>
+      <path d="M494 480h42"/><path d="M658 480h42"/><path d="M822 480h42"/>
+    </g>
+    <g fill="#edfaff" font-family="Segoe UI, Arial, sans-serif" font-size="14" text-anchor="middle">
+      <text x="445" y="455">MIC</text><text x="600" y="455">MEDIA</text><text x="756" y="455">SYSTEM</text><text x="878" y="455">42%</text>
+    </g>
+
+    <!-- Encoder knobs -->
+    <g filter="url(#small-shadow)">
+      <g transform="translate(374 564)"><circle r="42" fill="#202228" stroke="#535763" stroke-width="5"/><circle r="31" fill="url(#knob)"/><path d="M0-27v15" stroke="#31d2ef" stroke-width="5" stroke-linecap="round"/></g>
+      <g transform="translate(524 564)"><circle r="42" fill="#202228" stroke="#535763" stroke-width="5"/><circle r="31" fill="url(#knob)"/><path d="M0-27v15" stroke="#7b72ff" stroke-width="5" stroke-linecap="round"/></g>
+      <g transform="translate(674 564)"><circle r="42" fill="#202228" stroke="#535763" stroke-width="5"/><circle r="31" fill="url(#knob)"/><path d="M0-27v15" stroke="#bc64ff" stroke-width="5" stroke-linecap="round"/></g>
+      <g transform="translate(824 564)"><circle r="42" fill="#202228" stroke="#535763" stroke-width="5"/><circle r="31" fill="url(#knob)"/><path d="M0-27v15" stroke="#ff7b72" stroke-width="5" stroke-linecap="round"/></g>
+    </g>
+
+    <!-- Status banner -->
+    <rect x="122" y="657" width="956" height="58" rx="12" fill="#192a22" stroke="#305b44" stroke-width="2"/>
+    <circle cx="153" cy="686" r="15" fill="#50c878" opacity=".13"/><circle cx="153" cy="686" r="6" fill="#50c878"/>
+    <text x="183" y="680" fill="#50c878" font-family="Segoe UI, Arial, sans-serif" font-size="13" font-weight="700">ГОТОВО</text>
+    <text x="183" y="701" fill="#eff0f4" font-family="Segoe UI, Arial, sans-serif" font-size="17">HID 5548:1021 (Global) готов к работе</text>
+  </g>
+</svg>

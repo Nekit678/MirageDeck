@@ -1,137 +1,165 @@
-# Mirabox HID Emulator
+<p align="center">
+  <img src="docs/assets/miragedeck-logo.png" width="220" alt="Логотип MirageDeck">
+</p>
 
-Виртуальный **Mirabox Stream Dock N4 Pro** для Windows 11. Stream Dock видит
-обычное HID-устройство с идентификаторами глобального N4ProE
-`VID_5548&PID_1021`, а отдельная
-WinForms-панель показывает переданные устройству изображения и отправляет
-нажатия, вращения энкодеров и жесты обратно в программу.
+<h1 align="center">MirageDeck</h1>
 
-## Что реализовано
+<p align="center">
+  Виртуальный Mirabox Stream Dock N4 Pro для Windows 11.<br>
+  Полноценная HID-эмуляция, экранная панель и управление без физического устройства.
+</p>
 
-- UMDF 2 HID minidriver: Input/Output-часть report descriptor точно повторяет
-  прошивку N4 Pro 02.009; payload составляет 512/1024 байта, а буферы Windows
-  HID API — 513/1025 байт с ведущим нулевым report ID;
-- профиль N4 Pro: 10 LCD-кнопок, 4 нажимаемых энкодера и touch bar с четырьмя визуальными слотами;
-- служебный канал виртуальной панели: события передаются HID Output report через
-  `HidD_SetOutputReport`, а пакеты Stream Dock читаются через Feature report;
-  фактические длины обоих буферов панель получает из `HIDP_CAPS`;
-- разбор команд `BAT`, `LOG`, `BGPIC`, `LIG`, `CLE`, `DIS`, `STP` и сборка
-  изображений из нескольких HID-пакетов;
-- отрисовка PNG/JPEG на виртуальных кнопках и панели;
-- формирование аппаратных пакетов `ACK...OK` для клавиш/энкодеров и
-  координатных `ACK...ARX`-пакетов для touch bar;
-- тесты сборки пакетов и потокового декодера.
+<p align="center">
+  <a href="README.md">Русский</a> · <a href="README.en.md">English</a>
+</p>
 
-Профиль основан на открытом [StreamDock Device SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK)
-и проверенной реализации протокола для семейства 293. Драйверная обвязка
-основана на Microsoft `vhidmini2` и поэтому файлы в каталоге `driver` содержат
-лицензию MS-PL.
+<p align="center">
+  <a href="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml"><img alt="Сборка" src="https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml/badge.svg"></a>
+  <img alt="Windows 11 x64" src="https://img.shields.io/badge/Windows_11-x64-0078D4?logo=windows11&logoColor=white">
+  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet&logoColor=white">
+  <img alt="Статус версии" src="https://img.shields.io/badge/version-1.x%20early%20release-ffb500">
+</p>
 
-## Требования
+> [!WARNING]
+> **MirageDeck 1.x — первая публичная мажорная версия проекта.** Основные сценарии уже работают, но возможны ошибки, несовместимость с отдельными версиями Stream Dock и ещё не изученные команды протокола. Проект будет развиваться: ожидаются исправления, улучшения совместимости и новые возможности. Перед установкой прочитайте раздел [«Ограничения»](#ограничения).
 
-- Windows 11 22H2 или новее (UMDF HID bridge `MsHidUmdf`);
+MirageDeck создаёт в Windows виртуальное HID-устройство с профилем глобального **Mirabox N4ProE `5548:1021`**. Официальное приложение Stream Dock распознаёт его как обычную аппаратную панель, отправляет изображения клавиш и touch bar, а отдельное WinForms-приложение показывает их на экране и возвращает нажатия, вращения энкодеров и жесты.
+
+## Демонстрация
+
+<p align="center">
+  <img src="docs/assets/panel-preview.png" width="900" alt="Интерфейс виртуальной панели MirageDeck">
+</p>
+
+<p align="center"><sub>Статический предпросмотр текущего интерфейса. Изображения клавиш и touch bar в работающей панели поступают непосредственно из Stream Dock.</sub></p>
+
+```text
+Stream Dock ──изображения и команды──▶ виртуальный HID ──▶ панель MirageDeck
+Stream Dock ◀──клавиши, энкодеры, жесты── виртуальный HID ◀── панель MirageDeck
+```
+
+## Возможности
+
+- виртуальный **UMDF 2 HID minidriver**, совместимый с профилем N4 Pro firmware `02.009`;
+- 10 LCD-клавиш, 4 нажимаемых энкодера и сенсорный экран с двумя режимами;
+- отображение PNG, JPEG и raw BGR24, переданных приложением Stream Dock;
+- нажатия и отпускания клавиш, клики и вращение энкодеров;
+- Button Mode: 4 экранные функции энкодеров и горизонтальные свайпы между страницами;
+- Touchbar Mode: координатные касания, тапы и горизонтальный drag;
+- яркость, очистка, пробуждение экрана и автоматическое переключение режима по командам протокола;
+- потоковый декодер команд `BAT`, `LOG`, `BGPIC`, `MOD`, `LIG`, `CLE`, `DIS` и `STP`;
+- кроссплатформенные тесты ядра и готовый `win-x64` пакет из GitHub Actions.
+
+## Быстрый старт
+
+> [!IMPORTANT]
+> CI-пакет подписан временным самоподписанным сертификатом. Установочный скрипт добавляет его публичную часть в системные хранилища `Root` и `TrustedPublisher`, поэтому потребуются права администратора. MirageDeck использует UMDF 2 и не содержит собственного kernel-mode `.sys`: **Test Mode включать и Secure Boot отключать не требуется**. Устанавливайте только пакет из доверенного запуска CI.
+
+### Готовый пакет из GitHub Actions
+
+1. Откройте **[Actions → Build Windows package](https://github.com/Nekit678/MiraboxHIDEmulator/actions/workflows/build-windows.yml)**.
+2. Выберите последний успешный запуск и скачайте артефакт `MiraboxHIDEmulator-win-x64`.
+3. Полностью распакуйте ZIP в отдельную папку.
+4. Откройте PowerShell от имени администратора в папке пакета:
+
+   ```powershell
+   Set-ExecutionPolicy -Scope Process Bypass
+   .\scripts\verify-package.ps1
+   .\scripts\install-driver.ps1 -DriverDirectory .\driver
+   ```
+
+5. Запустите `panel\MiraboxEmulator.exe`, дождитесь статуса **«ГОТОВО»**, затем откройте Stream Dock. Если установщик запросил перезагрузку, выполните её перед запуском панели.
+
+Подробная инструкция также находится в `START-HERE.md` внутри артефакта. Артефакты GitHub Actions хранятся 30 дней; ZIP с исходным кодом из меню **Code** не является готовой сборкой.
+
+### Сборка из исходников
+
+Понадобятся:
+
+- Windows 11 22H2 или новее;
 - Visual Studio 2022 с компонентом **Desktop development with C++**;
 - Windows 11 SDK и Windows Driver Kit (WDK);
 - .NET 8 SDK;
 - права администратора для установки драйвера.
 
-## Онлайн-сборка без Visual Studio/WDK на своём компьютере
-
-В проекте настроен workflow `.github/workflows/build-windows.yml`. Он запускает
-тесты, публикует панель как self-contained `win-x64`, собирает UMDF-драйвер,
-создаёт отдельный тестовый сертификат, подписывает DLL и CAT, проверяет подписи
-и публикует готовый артефакт `MiraboxHIDEmulator-win-x64`.
-
-1. Создайте пустой публичный или приватный репозиторий на GitHub.
-2. Отправьте этот проект в ветку `main`.
-3. Откройте **Actions → Build Windows package → Run workflow**.
-4. После успешной сборки откройте run и скачайте артефакт
-   `MiraboxHIDEmulator-win-x64` внизу страницы.
-5. Распакуйте ZIP и следуйте `START-HERE.md` внутри него.
-
-Workflow также запускается при push в `main` и проверяет pull requests. Секреты
-или собственный сертификат для тестовой сборки не нужны. Артефакт хранится 30
-дней. Он предназначен только для разработки: чтобы устанавливать драйвер без
-Test Mode, потребуется production/attestation signing Microsoft.
-
-## Сборка
-
-В Developer PowerShell for VS 2022:
+В **Developer PowerShell for VS 2022**:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build.ps1 Debug
 dotnet run --project .\test\Mirabox.Emulator.Core.Tests -c Release
-```
-
-Visual Studio/WDK создаёт тестовый сертификат для Debug-пакета. На тестовой
-машине до установки один раз включите test signing и перезагрузите Windows:
-
-```powershell
-bcdedit /set testsigning on
-```
-
-При включённом Secure Boot Windows может не позволить включить test signing.
-Для распространения нужен нормально подписанный пакет драйвера; обход проверки
-подписи в проект не входит.
-
-## Установка и запуск
-
-PowerShell от имени администратора:
-
-```powershell
 .\scripts\install-driver.ps1 -DriverDirectory .\driver\x64\Debug
-```
-
-Затем:
-
-```powershell
 dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 ```
 
-1. Убедитесь, что панель показывает статус `ГОТОВО` и сообщение
-   `HID 5548:1021 (Global) готов к работе`.
-2. Запустите Mirabox Stream Dock.
-3. Назначьте действия кнопкам. Переданные PNG/JPEG появятся на панели.
-4. Нажатие виртуальной кнопки генерирует down/up. Щелчок по энкодеру генерирует
-   одиночное аппаратное нажатие, колесо мыши над ним — вращение.
-5. В Button Mode четыре области сенсорного экрана соответствуют четырём
-   энкодерам, горизонтальный свайп переключает страницу/сцену. Режим выбирается
-   в Stream Dock: у аппаратного вертикального свайпа нет отдельного input-кода,
-   которым эмулятор мог бы переключить интерфейс приложения. В Touchbar Mode
-   тап передаётся как короткая серия одинаковых `ARX`-точек и запускает текущий
-   элемент, а горизонтальный drag — как последовательность координат. Следующий
-   жест продолжается от последней HID-точки, поэтому содержимое не скачет между
-   отдельными контактами.
-   Панель также распознаёт команду режима и тип загружаемого слоя от Stream Dock.
-   Как и на физическом N4 Pro, значки энкодеров в Touchbar Mode скрыты.
+## Управление
 
-Если устройство уже было создано, повторный запуск install-скрипта не нужен.
-Для удаления:
+| Элемент панели | Действие мышью | Событие устройства |
+| --- | --- | --- |
+| LCD-клавиша | нажать и отпустить | key down / key up |
+| Энкодер | щелчок | аппаратное нажатие |
+| Энкодер | колесо мыши над ручкой | вращение влево / вправо |
+| Touch display, Button Mode | щелчок по одному из 4 сегментов | функция энкодера |
+| Touch display, Button Mode | горизонтальный свайп | предыдущая / следующая страница |
+| Touch display, Touchbar Mode | тап | активация элемента по координате |
+| Touch display, Touchbar Mode | горизонтальный drag | последовательность `ARX`-координат |
+
+Режим touch display выбирает Stream Dock. У физического N4 Pro вертикальный свайп обрабатывается самой прошивкой и не имеет отдельного HID-кода, поэтому MirageDeck не может переключать режим приложения таким жестом.
+
+## Как это устроено
+
+```mermaid
+flowchart LR
+    SD[Mirabox Stream Dock] <-->|HID reports| DRV[UMDF 2 virtual HID]
+    DRV <-->|feature channel| PANEL[WinForms panel]
+    PANEL --> CORE[Protocol decoder]
+    CORE --> UI[Keys · touch display · encoders]
+    UI -->|input reports| DRV
+```
+
+| Каталог | Назначение |
+| --- | --- |
+| [`driver/`](driver/) | виртуальный UMDF 2 HID-драйвер |
+| [`src/Mirabox.Emulator.Core/`](src/Mirabox.Emulator.Core/) | профиль устройства, input reports и декодер протокола |
+| [`src/Mirabox.Emulator.Panel/`](src/Mirabox.Emulator.Panel/) | Windows-панель и служебный HID-канал |
+| [`test/`](test/) | автономные тесты формирования и декодирования пакетов |
+| [`scripts/`](scripts/) | сборка, упаковка, проверка, установка и удаление |
+| [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | исследованная часть протокола N4 Pro |
+
+## Ограничения
+
+- Поддерживается только глобальный **N4ProE `VID_5548&PID_1021`**. Китайский вариант с PID `1008` и другие модели Mirabox имеют отличающиеся профили.
+- Совместимость может зависеть от версии Stream Dock. Неизвестные команды безопасно возвращаются как `UnknownCommandUpdate`, но их эффект ещё не реализован.
+- Драйвер эмулирует HID-функцию, но не USB topology и USB descriptors физического composite-устройства. Программы, проверяющие USB parent, могут не обнаружить MirageDeck.
+- Публичный пакет пока использует локально доверенный самоподписанный сертификат. Test Mode для текущего UMDF-драйвера не нужен, однако корпоративные политики WDAC/App Control могут запретить такой пакет. Для распространения без добавления сертификата в системное хранилище потребуется release-подпись, которой Windows уже доверяет, например Microsoft attestation/WHQL.
+- Проект тестировался на Windows 11 x64; другие версии и архитектуры пока не заявлены как поддерживаемые.
+
+## Удаление
+
+В PowerShell от имени администратора:
 
 ```powershell
 .\scripts\uninstall-driver.ps1
 ```
 
-## Важные ограничения
+Скрипт удаляет виртуальное устройство и все сертификаты с проектным subject `CN=Mirabox HID Emulator Test` из `Root` и `TrustedPublisher`. Чтобы намеренно сохранить сертификаты:
 
-- Это профиль глобального **N4ProE 5548:1021**. PID `1008` относится к варианту
-  для материкового Китая и вызывает региональное предупреждение Stream Dock.
-  Другие модели Mirabox имеют другие VID/PID,
-  размеры и таблицы аппаратных кодов; простой заменой PID они не становятся
-  совместимыми.
-- Точная совместимость зависит от версии Stream Dock. В `docs/PROTOCOL.md`
-  описано, как снять неизвестный пакет; декодер намеренно отдаёт неизвестные
-  команды как `UnknownCommandUpdate`, а не принимает их за изображение.
-- Драйвер эмулирует HID-функцию, но не USB topology/USB descriptors физического
-  composite-устройства. Текущий Stream Dock и Device SDK обнаруживают устройство
-  по HID VID/PID и usage; программа, которая дополнительно требует USB parent,
-  потребует USB device emulation вместо HID minidriver.
+```powershell
+.\scripts\uninstall-driver.ps1 -KeepTestCertificate
+```
 
-## Структура
+## Планы
 
-- `driver/` — виртуальный UMDF 2 HID-драйвер;
-- `src/Mirabox.Emulator.Core/` — профиль, входные отчёты и декодер;
-- `src/Mirabox.Emulator.Panel/` — Windows-панель и служебный HID feature-канал;
-- `test/` — кроссплатформенные тесты без сторонних test framework;
-- `scripts/` — сборка, установка и удаление.
+- исправлять найденные ошибки и регрессии Stream Dock;
+- расширять покрытие неизвестных команд протокола;
+- улучшать диагностику подключения и журналирование;
+- упростить выпуск подписанных и версионированных сборок;
+- расширять автоматические тесты драйвера и интерфейса.
+
+Нашли ошибку? Создайте [issue](https://github.com/Nekit678/MiraboxHIDEmulator/issues) и приложите версию Windows, версию Stream Dock, шаги воспроизведения и, если возможно, HID-трассировку. Инструкция по исследованию неизвестных пакетов находится в [`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
+## Благодарности и правовая информация
+
+Профиль устройства основан на открытом [StreamDock Device SDK](https://github.com/MiraboxSpace/StreamDock-Device-SDK) и проверенной реализации протокола семейства 293. Драйверная часть основана на примере Microsoft `vhidmini2`; файлы каталога [`driver/`](driver/) распространяются на условиях MS-PL, приведённых в [`driver/LICENSE-MS-PL`](driver/LICENSE-MS-PL).
+
+MirageDeck — независимый проект и не связан с Mirabox, HOTSPOTEK или Microsoft. Названия и товарные знаки принадлежат их владельцам.
