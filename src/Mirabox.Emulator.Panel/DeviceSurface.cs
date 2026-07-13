@@ -7,15 +7,14 @@ internal sealed class DeviceSurface : Control
 {
     private const int LogicalWidth = 800;
     private const int LogicalHeight = 480;
-    // Mouse clicks naturally drift by a few pixels. Keep that jitter a tap;
-    // gesture handling starts only after a deliberate movement.
-    private const int TouchDragThreshold = 8;
+    private const int TouchReportIntervalMs = 16;
     private const float CanvasWidth = 800f;
     private const float CanvasHeight = 420f;
     private readonly Image?[] _keys = new Image?[10];
     private readonly Image?[] _secondaryKeys = new Image?[4];
     private readonly RectangleF[] _keyRects = new RectangleF[10];
     private readonly RectangleF[] _knobRects = new RectangleF[4];
+    private readonly System.Windows.Forms.Timer _touchReportTimer = new() { Interval = TouchReportIntervalMs };
     private RectangleF _touchRect;
     private int _activeKey = -1;
     private int _activeKnob = -1;
@@ -24,6 +23,9 @@ internal sealed class DeviceSurface : Control
     private int _hoverKnob = -1;
     private int _hoverSecondary = -1;
     private Point _touchStart;
+    private Point? _pendingTouchLocation;
+    private Point? _lastTouchLocation;
+    private long _lastTouchReportAt;
     private bool _touching;
     private bool _hoverTouch;
     private TouchDisplayMode _touchMode = TouchDisplayMode.Button;
@@ -41,6 +43,7 @@ internal sealed class DeviceSurface : Control
         ForeColor = Palette.PrimaryText;
         MinimumSize = new Size(700, 430);
         SetStyle(ControlStyles.Selectable | ControlStyles.ResizeRedraw, true);
+        _touchReportTimer.Tick += (_, _) => FlushPendingTouch();
     }
 
     public void SetKeyImage(int index, Image image)
@@ -343,9 +346,14 @@ internal sealed class DeviceSurface : Control
             }
         if (_touchRect.Contains(e.Location))
         {
+            _touchReportTimer.Stop();
+            _pendingTouchLocation = null;
+            _lastTouchLocation = null;
             _touching = true;
             _touchStart = e.Location;
             _activeSecondary = _touchMode == TouchDisplayMode.Button ? SegmentAt(e.Location) : -1;
+            if (_touchMode == TouchDisplayMode.TouchBar)
+                EmitTouch(e.Location, force: true);
             Invalidate();
         }
     }
@@ -360,6 +368,8 @@ internal sealed class DeviceSurface : Control
                 UpdateHover(e.Location);
                 return;
             }
+            if (_touchMode == TouchDisplayMode.TouchBar)
+                EmitTouch(e.Location);
         }
         UpdateHover(e.Location);
     }
@@ -387,19 +397,22 @@ internal sealed class DeviceSurface : Control
         }
         if (_touching && !TrySwitchTouchMode(e.Location))
         {
-            var deltaX = e.X - _touchStart.X;
-            var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
-            if (horizontalSwipe)
+            if (_touchMode == TouchDisplayMode.TouchBar)
             {
-                Emit(InputReportFactory.Swipe(deltaX < 0), deltaX < 0 ? "Свайп влево" : "Свайп вправо");
+                // ARX has no separate release flag. The physical controller
+                // reports the contact from its first point through its final
+                // point; Stream Dock derives taps and scrolling from that
+                // sequence and the pause after it.
+                EmitTouch(e.Location, force: true);
             }
-            else if (_touchMode == TouchDisplayMode.Button && _activeSecondary >= 0)
+            else
             {
-                Emit(InputReportFactory.SecondaryTap(_activeSecondary), $"Функция энкодера {_activeSecondary + 1}");
-            }
-            else if (_touchMode == TouchDisplayMode.TouchBar && !HasTouchDragStarted(e.Location))
-            {
-                EmitTouch(e.Location);
+                var deltaX = e.X - _touchStart.X;
+                var horizontalSwipe = Math.Abs(deltaX) > Math.Max(30, _touchRect.Width / 10);
+                if (horizontalSwipe)
+                    Emit(InputReportFactory.Swipe(deltaX < 0), deltaX < 0 ? "Свайп влево" : "Свайп вправо");
+                else if (_activeSecondary >= 0)
+                    Emit(InputReportFactory.SecondaryTap(_activeSecondary), $"Функция энкодера {_activeSecondary + 1}");
             }
             _touching = false;
             _activeSecondary = -1;
@@ -441,6 +454,9 @@ internal sealed class DeviceSurface : Control
         _touchMode = mode;
         _activeSecondary = -1;
         _hoverSecondary = -1;
+        _pendingTouchLocation = null;
+        _lastTouchLocation = null;
+        _touchReportTimer.Stop();
         StatusChanged?.Invoke(mode == TouchDisplayMode.Button
             ? "Button Mode: экран связан с четырьмя энкодерами"
             : "Touchbar Mode: экран принимает координатные касания");
@@ -456,6 +472,8 @@ internal sealed class DeviceSurface : Control
             return false;
 
         var requestedMode = deltaY < 0 ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button;
+        _touchReportTimer.Stop();
+        _pendingTouchLocation = null;
         _touching = false;
         _activeSecondary = -1;
         if (_touchMode != requestedMode)
@@ -469,21 +487,43 @@ internal sealed class DeviceSurface : Control
     private RectangleF TouchSegment(int index) =>
         new(_touchRect.Left + index * _touchRect.Width / 4, _touchRect.Top, _touchRect.Width / 4, _touchRect.Height);
 
-    private bool HasTouchDragStarted(Point location)
+    private void EmitTouch(Point location, bool force = false)
     {
-        var deltaX = location.X - _touchStart.X;
-        var deltaY = location.Y - _touchStart.Y;
-        return deltaX * deltaX + deltaY * deltaY >= TouchDragThreshold * TouchDragThreshold;
+        if (_lastTouchLocation == location)
+        {
+            _pendingTouchLocation = null;
+            return;
+        }
+
+        var now = Environment.TickCount64;
+        if (!force && now - _lastTouchReportAt < TouchReportIntervalMs)
+        {
+            // MouseMove can outpace the HID consumer. Keep only the newest
+            // coordinate so scrolling stays responsive instead of replaying a
+            // queue of stale points.
+            _pendingTouchLocation = location;
+            _touchReportTimer.Start();
+            return;
+        }
+
+        _touchReportTimer.Stop();
+        _pendingTouchLocation = null;
+        _lastTouchLocation = location;
+        _lastTouchReportAt = now;
+        // MainForm rotates uploaded display frames back into their visual
+        // orientation. Touch coordinates are already reported in that visual
+        // orientation, so map the panel directly instead of rotating them a
+        // second time.
+        var x = (ushort)Math.Clamp((location.X - _touchRect.Left) / _touchRect.Width * LogicalWidth, 0, LogicalWidth - 1);
+        var y = (ushort)Math.Clamp((location.Y - _touchRect.Top) / _touchRect.Height * LogicalHeight, 0, LogicalHeight - 1);
+        Emit(InputReportFactory.Touch(x, y), $"Touch: {x}, {y}");
     }
 
-    private void EmitTouch(Point location)
+    private void FlushPendingTouch()
     {
-        // Stream Dock rotates N4 Pro display frames by 180 degrees before
-        // upload. The physical touch controller uses that same raw orientation,
-        // so UI coordinates must be mirrored to emulate hardware coordinates.
-        var x = (ushort)Math.Clamp((_touchRect.Right - location.X) / _touchRect.Width * LogicalWidth, 0, LogicalWidth - 1);
-        var y = (ushort)Math.Clamp((_touchRect.Bottom - location.Y) / _touchRect.Height * LogicalHeight, 0, LogicalHeight - 1);
-        Emit(InputReportFactory.Touch(x, y), $"Touch: {x}, {y}");
+        _touchReportTimer.Stop();
+        if (_pendingTouchLocation is { } location)
+            EmitTouch(location, force: true);
     }
 
     private void Emit(byte[] report, string description) => InputGenerated?.Invoke(report, description);
@@ -495,6 +535,7 @@ internal sealed class DeviceSurface : Control
     {
         if (disposing)
         {
+            _touchReportTimer.Dispose();
             foreach (var image in _keys) image?.Dispose();
             foreach (var image in _secondaryKeys) image?.Dispose();
             BackgroundImageValue?.Dispose();
