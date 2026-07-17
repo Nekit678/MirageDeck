@@ -39,7 +39,7 @@
     <ClInclude Include="common.h" />
     <Inf Include="StreamDeckPlusEmulator.inx">
       <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
-      <DateStamp>07/18/2026</DateStamp>
+      <DateStamp>07/17/2026</DateStamp>
       <SpecifyDriverDirectiveVersion>true</SpecifyDriverDirectiveVersion>
       <TimeStamp>$(FileVersion)</TimeStamp>
     </Inf>
