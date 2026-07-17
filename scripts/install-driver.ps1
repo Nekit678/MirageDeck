@@ -35,6 +35,44 @@ function Get-DeviceClassGuid {
   return ""
 }
 
+function Get-DriverInitializationDetails {
+  param([Parameter(Mandatory)]$Device)
+  $details = [ordered]@{
+    InstanceId = $Device.InstanceId
+    ProblemCode = "unknown"
+    ProblemStatus = "unknown"
+    Stage = "not recorded"
+    InitializationStatus = "not recorded"
+  }
+  $problemCode = Get-PnpDeviceProperty `
+    -InstanceId $Device.InstanceId `
+    -KeyName "DEVPKEY_Device_ProblemCode" `
+    -ErrorAction SilentlyContinue
+  if ($null -ne $problemCode -and $null -ne $problemCode.Data) {
+    $details.ProblemCode = $problemCode.Data.ToString()
+  }
+  $problemStatus = Get-PnpDeviceProperty `
+    -InstanceId $Device.InstanceId `
+    -KeyName "DEVPKEY_Device_ProblemStatus" `
+    -ErrorAction SilentlyContinue
+  if ($null -ne $problemStatus -and $null -ne $problemStatus.Data) {
+    $details.ProblemStatus = "0x{0:X8}" -f `
+      ([Convert]::ToInt64($problemStatus.Data) -band 4294967295)
+  }
+  $parametersPath = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\$($Device.InstanceId)\Device Parameters"
+  $parameters = Get-ItemProperty -LiteralPath $parametersPath -ErrorAction SilentlyContinue
+  if ($null -ne $parameters) {
+    $stageProperty = $parameters.PSObject.Properties["MirageDeckInitializationStage"]
+    if ($null -ne $stageProperty) { $details.Stage = $stageProperty.Value.ToString() }
+    $statusProperty = $parameters.PSObject.Properties["MirageDeckInitializationStatus"]
+    if ($null -ne $statusProperty) {
+      $details.InitializationStatus = "0x{0:X8}" -f `
+        ([Convert]::ToInt64($statusProperty.Value) -band 4294967295)
+    }
+  }
+  return [PSCustomObject]$details
+}
+
 function Test-CertificateInStore {
   param(
     [Parameter(Mandatory)][string]$Store,
@@ -210,7 +248,19 @@ if ($rebootRequired) {
     Where-Object InstanceId -Like "USB\VID_0FD9&PID_0084*" |
     Select-Object -First 1
   if (-not $usbDevice -or $usbDevice.Status -ne "OK") {
-    throw "The driver package was installed, but USB\\VID_0FD9&PID_0084 did not start correctly. Restart Windows and check Device Manager."
+    $controller = Get-MirageDeckRootDevice | Select-Object -First 1
+    if ($controller) {
+      $details = Get-DriverInitializationDetails $controller
+      throw @"
+The driver package was installed, but USB\VID_0FD9&PID_0084 did not start correctly.
+Controller: $($details.InstanceId)
+PnP problem code: $($details.ProblemCode)
+PnP problem status: $($details.ProblemStatus)
+Driver initialization stage: $($details.Stage)
+Driver initialization status: $($details.InitializationStatus)
+"@
+    }
+    throw "The driver package was installed, but the MirageDeck controller and USB\\VID_0FD9&PID_0084 were not found."
   }
   Write-Host "The MirageDeck virtual USB device was installed as $($usbDevice.InstanceId)."
   Write-Host "Launch the panel, then the Elgato Stream Deck app."

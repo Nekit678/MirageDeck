@@ -143,6 +143,7 @@ static NTSTATUS CreateEndpoint(PDEVICE_CONTEXT Context, UCHAR Address,
                                PFN_WDF_IO_QUEUE_IO_INTERNAL_DEVICE_CONTROL Callback,
                                UDECXUSBENDPOINT* Endpoint);
 static NTSTATUS CreateQueues(PDEVICE_CONTEXT Context);
+static VOID RecordInitializationState(WDFDEVICE Device, PCWSTR Stage, NTSTATUS Status);
 static VOID CompleteControlData(WDFREQUEST Request, const VOID* Data, ULONG Length, USHORT RequestedLength);
 static VOID CompleteControlStatus(WDFREQUEST Request, NTSTATUS Status);
 static VOID StallControlRequest(WDFREQUEST Request);
@@ -189,22 +190,35 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
 
     context = GetDeviceContext(device);
     context->Device = device;
+    RecordInitializationState(device, L"controller-created", STATUS_PENDING);
 
     WDF_OBJECT_ATTRIBUTES_INIT(&lockAttributes);
     lockAttributes.ParentObject = device;
     status = WdfSpinLockCreate(&lockAttributes, &context->StateLock);
-    if (!NT_SUCCESS(status)) return status;
+    if (!NT_SUCCESS(status)) {
+        RecordInitializationState(device, L"create-state-lock", status);
+        return status;
+    }
 
     UDECX_WDF_DEVICE_CONFIG_INIT(&controllerConfig, EvtQueryUsbCapability);
-    controllerConfig.NumberOfUsb20Ports = 1;
-    controllerConfig.NumberOfUsb30Ports = 0;
+    /* Keep UdeCx's compatible default of one USB 2.0 and one USB 3.0 port. */
+    RecordInitializationState(device, L"add-usb-device-emulation", STATUS_PENDING);
     status = UdecxWdfDeviceAddUsbDeviceEmulation(device, &controllerConfig);
-    if (!NT_SUCCESS(status)) return status;
+    if (!NT_SUCCESS(status)) {
+        RecordInitializationState(device, L"add-usb-device-emulation", status);
+        return status;
+    }
 
+    RecordInitializationState(device, L"create-controller-queues", STATUS_PENDING);
     status = CreateQueues(context);
-    if (!NT_SUCCESS(status)) return status;
+    if (!NT_SUCCESS(status)) {
+        RecordInitializationState(device, L"create-controller-queues", status);
+        return status;
+    }
 
-    return CreateUsbDevice(context);
+    status = CreateUsbDevice(context);
+    if (NT_SUCCESS(status)) RecordInitializationState(device, L"ready", STATUS_SUCCESS);
+    return status;
 }
 
 static NTSTATUS
@@ -274,40 +288,49 @@ static NTSTATUS
 CreateUsbDevice(PDEVICE_CONTEXT Context)
 {
     PUDECXUSBDEVICE_INIT init = NULL;
-    UDECX_USB_DEVICE_STATE_CHANGE_CALLBACKS callbacks;
     UDECX_USB_DEVICE_PLUG_IN_OPTIONS plugInOptions;
     WDF_OBJECT_ATTRIBUTES attributes;
     PUSB_DEVICE_CONTEXT usbContext;
     UDECXUSBDEVICE usbDevice = NULL;
     NTSTATUS status;
 
+    RecordInitializationState(Context->Device, L"allocate-usb-device", STATUS_PENDING);
     init = UdecxUsbDeviceInitAllocate(Context->Device);
-    if (init == NULL) return STATUS_INSUFFICIENT_RESOURCES;
+    if (init == NULL) {
+        RecordInitializationState(Context->Device, L"allocate-usb-device",
+                                  STATUS_INSUFFICIENT_RESOURCES);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
 
-    UDECX_USB_DEVICE_CALLBACKS_INIT(&callbacks);
-    UdecxUsbDeviceInitSetStateChangeCallbacks(init, &callbacks);
     UdecxUsbDeviceInitSetSpeed(init, UdecxUsbHighSpeed);
     UdecxUsbDeviceInitSetEndpointsType(init, UdecxEndpointTypeSimple);
 
+    RecordInitializationState(Context->Device, L"add-device-descriptor", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddDescriptor(init, (PUCHAR)G_UsbDeviceDescriptor,
                                               sizeof(G_UsbDeviceDescriptor));
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"add-configuration-descriptor", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddDescriptor(init, (PUCHAR)G_UsbConfigurationDescriptor,
                                               sizeof(G_UsbConfigurationDescriptor));
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"add-language-descriptor", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddDescriptorWithIndex(init, (PUCHAR)G_LanguageDescriptor,
                                                        sizeof(G_LanguageDescriptor), 0);
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"add-manufacturer-string", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddStringDescriptor(init, &G_ManufacturerString,
                                                     MIRAGE_MANUFACTURER_INDEX, MIRAGE_LANGUAGE_ID);
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"add-product-string", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddStringDescriptor(init, &G_ProductString,
                                                     MIRAGE_PRODUCT_INDEX, MIRAGE_LANGUAGE_ID);
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"add-serial-string", STATUS_PENDING);
     status = UdecxUsbDeviceInitAddStringDescriptor(init, &G_SerialString,
                                                     MIRAGE_SERIAL_INDEX, MIRAGE_LANGUAGE_ID);
     if (!NT_SUCCESS(status)) goto Exit;
 
+    RecordInitializationState(Context->Device, L"create-usb-device", STATUS_PENDING);
     WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, USB_DEVICE_CONTEXT);
     status = UdecxUsbDeviceCreate(&init, &attributes, &usbDevice);
     if (!NT_SUCCESS(status)) goto Exit;
@@ -315,16 +338,20 @@ CreateUsbDevice(PDEVICE_CONTEXT Context)
     usbContext->Controller = Context;
     Context->UsbDevice = usbDevice;
 
+    RecordInitializationState(Context->Device, L"create-control-endpoint", STATUS_PENDING);
     status = CreateEndpoint(Context, STREAMDECK_CONTROL_ENDPOINT, EvtControlUrb,
                             &Context->ControlEndpoint);
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"create-input-endpoint", STATUS_PENDING);
     status = CreateEndpoint(Context, STREAMDECK_INPUT_ENDPOINT, EvtInputUrb,
                             &Context->InputEndpoint);
     if (!NT_SUCCESS(status)) goto Exit;
+    RecordInitializationState(Context->Device, L"create-output-endpoint", STATUS_PENDING);
     status = CreateEndpoint(Context, STREAMDECK_OUTPUT_ENDPOINT, EvtOutputUrb,
                             &Context->OutputEndpoint);
     if (!NT_SUCCESS(status)) goto Exit;
 
+    RecordInitializationState(Context->Device, L"plug-in-usb-device", STATUS_PENDING);
     UDECX_USB_DEVICE_PLUG_IN_OPTIONS_INIT(&plugInOptions);
     plugInOptions.Usb20PortNumber = 1;
     status = UdecxUsbDevicePlugIn(usbDevice, &plugInOptions);
@@ -334,12 +361,38 @@ CreateUsbDevice(PDEVICE_CONTEXT Context)
     usbDevice = NULL;
 
 Exit:
+    if (!NT_SUCCESS(status)) {
+        WDFKEY key;
+        UNICODE_STRING statusName = RTL_CONSTANT_STRING(L"MirageDeckInitializationStatus");
+        if (NT_SUCCESS(WdfDeviceOpenRegistryKey(Context->Device, PLUGPLAY_REGKEY_DEVICE,
+                                                KEY_SET_VALUE, WDF_NO_OBJECT_ATTRIBUTES, &key))) {
+            (VOID)WdfRegistryAssignULong(key, &statusName, (ULONG)status);
+            WdfObjectDelete(key);
+        }
+    }
     if (usbDevice != NULL) {
         Context->UsbDevice = NULL;
         WdfObjectDelete(usbDevice);
     }
     if (init != NULL) UdecxUsbDeviceInitFree(init);
     return status;
+}
+
+static VOID
+RecordInitializationState(WDFDEVICE Device, PCWSTR Stage, NTSTATUS Status)
+{
+    WDFKEY key;
+    UNICODE_STRING stageName = RTL_CONSTANT_STRING(L"MirageDeckInitializationStage");
+    UNICODE_STRING statusName = RTL_CONSTANT_STRING(L"MirageDeckInitializationStatus");
+    UNICODE_STRING stageValue;
+
+    if (!NT_SUCCESS(WdfDeviceOpenRegistryKey(Device, PLUGPLAY_REGKEY_DEVICE,
+                                             KEY_SET_VALUE, WDF_NO_OBJECT_ATTRIBUTES, &key)))
+        return;
+    RtlInitUnicodeString(&stageValue, Stage);
+    (VOID)WdfRegistryAssignUnicodeString(key, &stageName, &stageValue);
+    (VOID)WdfRegistryAssignULong(key, &statusName, (ULONG)Status);
+    WdfObjectDelete(key);
 }
 
 static NTSTATUS
