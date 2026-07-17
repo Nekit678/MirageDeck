@@ -5,10 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Mirabox.Emulator.Panel;
 
-/// <summary>
-/// Opens the driver's private device interface. The public HID descriptor is
-/// kept byte-compatible with Stream Deck + and is used only by host software.
-/// </summary>
+/// <summary>Opens the public HID collection and uses its panel-only feature report.</summary>
 internal sealed class HidDevice : IDisposable
 {
     private const uint DigcfPresent = 0x02;
@@ -18,30 +15,29 @@ internal sealed class HidDevice : IDisposable
     private const uint FileShareRead = 0x01;
     private const uint FileShareWrite = 0x02;
     private const uint OpenExisting = 3;
-    private const uint IoctlInjectInput = 0x0022A000;
-    private const uint IoctlGetCapture = 0x00226004;
-    private const int CapturedHeaderLength = 4;
-    private const int CapturedReportLength = CapturedHeaderLength + StreamDeckPlusProfile.OutputReportLength;
-
-    private static readonly Guid PanelInterfaceGuid =
-        new("2F5E3A9C-54A4-4A18-A73D-61F40EB0D92B");
 
     private readonly SafeFileHandle _handle;
     private readonly object _ioLock = new();
+    private byte _inputTransaction;
 
-    private HidDevice(SafeFileHandle handle) => _handle = handle;
+    private HidDevice(SafeFileHandle handle)
+    {
+        _handle = handle;
+        ResetPanelTransport();
+    }
 
     public static HidDevice OpenStreamDeckPlus()
     {
-        var interfaceGuid = PanelInterfaceGuid;
-        var set = SetupDiGetClassDevs(ref interfaceGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
+        HidD_GetHidGuid(out var hidGuid);
+        var set = SetupDiGetClassDevs(ref hidGuid, null, IntPtr.Zero, DigcfPresent | DigcfDeviceInterface);
         if (set == new IntPtr(-1)) throw new Win32Exception();
+        var openErrors = new List<int>();
         try
         {
             for (uint index = 0; ; index++)
             {
                 var info = new SpDeviceInterfaceData { Size = Marshal.SizeOf<SpDeviceInterfaceData>() };
-                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref interfaceGuid, index, ref info))
+                if (!SetupDiEnumDeviceInterfaces(set, IntPtr.Zero, ref hidGuid, index, ref info))
                 {
                     if (Marshal.GetLastWin32Error() == 259) break;
                     continue;
@@ -57,56 +53,125 @@ internal sealed class HidDevice : IDisposable
                     if (path is null) continue;
                     var handle = CreateFile(path, GenericRead | GenericWrite, FileShareRead | FileShareWrite,
                         IntPtr.Zero, OpenExisting, 0, IntPtr.Zero);
-                    if (!handle.IsInvalid) return new HidDevice(handle);
+                    if (handle.IsInvalid)
+                    {
+                        openErrors.Add(Marshal.GetLastWin32Error());
+                        handle.Dispose();
+                        continue;
+                    }
+
+                    var attributes = new HiddAttributes { Size = Marshal.SizeOf<HiddAttributes>() };
+                    if (HidD_GetAttributes(handle, ref attributes)
+                        && attributes.VendorId == StreamDeckPlusProfile.VendorId
+                        && attributes.ProductId == StreamDeckPlusProfile.ProductId)
+                    {
+                        var featureLength = GetFeatureReportLength(handle);
+                        if (featureLength != PanelTransportProtocol.ReportLength)
+                        {
+                            handle.Dispose();
+                            throw new IOException(
+                                $"Драйвер сообщил FeatureReportByteLength={featureLength}, ожидалось {PanelTransportProtocol.ReportLength}.");
+                        }
+                        try { return new HidDevice(handle); }
+                        catch { handle.Dispose(); throw; }
+                    }
                     handle.Dispose();
                 }
                 finally { Marshal.FreeHGlobal(detail); }
             }
         }
         finally { SetupDiDestroyDeviceInfoList(set); }
-        throw new IOException("Виртуальный Stream Deck + (0FD9:0084) не найден. Установите драйвер и перезапустите панель.");
+
+        var suffix = openErrors.Count == 0
+            ? string.Empty
+            : $" Последняя ошибка CreateFile: {new Win32Exception(openErrors[^1]).Message} ({openErrors[^1]}).";
+        throw new IOException(
+            $"Виртуальный Stream Deck + (0FD9:0084) не найден среди публичных HID-устройств.{suffix}");
     }
 
     public void InjectInput(ReadOnlySpan<byte> report)
     {
-        if (report.Length != StreamDeckPlusProfile.InputReportLength || report[0] != StreamDeckPlusProfile.InputReportId)
-            throw new ArgumentException("Invalid Stream Deck + input report", nameof(report));
-        var input = report.ToArray();
+        var transaction = unchecked(++_inputTransaction);
+        var chunks = PanelTransportProtocol.CreateInjectionReports(report, transaction);
         lock (_ioLock)
         {
-            if (!DeviceIoControl(_handle, IoctlInjectInput, input, input.Length, null, 0, out _, IntPtr.Zero))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось передать input report виртуальному HID");
+            foreach (var chunk in chunks) SetFeature(chunk, "Не удалось передать input report виртуальному HID");
         }
     }
 
     public bool TryReadCapture(out CapturedReport capture)
     {
-        var output = new byte[CapturedReportLength];
         lock (_ioLock)
         {
-            if (!DeviceIoControl(_handle, IoctlGetCapture, null, 0, output, output.Length, out var returned, IntPtr.Zero))
-                throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось прочитать служебный канал виртуального HID");
-            if (returned != output.Length)
-                throw new IOException($"Драйвер вернул {returned} байт вместо {output.Length}");
-        }
+            var first = ReadPanelFeature();
+            if (first.Command == PanelTransportCommand.None)
+            {
+                capture = default;
+                return false;
+            }
+            if (first.Index != 0)
+                throw new IOException($"Служебная передача началась с чанка {first.Index}, ожидался 0");
 
-        var kind = (CapturedReportKind)output[0];
-        if (kind == CapturedReportKind.None)
-        {
-            capture = default;
-            return false;
+            var contents = new byte[first.TotalLength];
+            CopyChunk(first, contents);
+            for (byte expected = 1; expected < first.Count; expected++)
+            {
+                var next = ReadPanelFeature();
+                if (next.Command != PanelTransportCommand.CaptureChunk
+                    || next.Transaction != first.Transaction
+                    || next.Kind != first.Kind
+                    || next.Index != expected
+                    || next.Count != first.Count
+                    || next.TotalLength != first.TotalLength)
+                    throw new IOException($"Нарушена последовательность служебных HID-чанков на индексе {expected}");
+                CopyChunk(next, contents);
+            }
+
+            capture = new CapturedReport(first.Kind, contents);
+            return true;
         }
-        var length = BitConverter.ToUInt16(output, 2);
-        var expected = kind switch
+    }
+
+    private void ResetPanelTransport()
+    {
+        lock (_ioLock) SetFeature(PanelTransportProtocol.CreateResetReport(), "Не удалось инициализировать служебный HID-канал");
+    }
+
+    private PanelTransportChunk ReadPanelFeature()
+    {
+        var feature = new byte[PanelTransportProtocol.ReportLength];
+        feature[0] = PanelTransportProtocol.ReportId;
+        if (!HidD_GetFeature(_handle, feature, feature.Length))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Не удалось прочитать служебный HID Feature report");
+        return PanelTransportProtocol.ParseResponse(feature);
+    }
+
+    private void SetFeature(byte[] feature, string message)
+    {
+        if (!HidD_SetFeature(_handle, feature, feature.Length))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), message);
+    }
+
+    private static void CopyChunk(PanelTransportChunk chunk, byte[] destination) =>
+        chunk.Data.CopyTo(destination, chunk.Index * PanelTransportProtocol.PayloadLength);
+
+    private static int GetFeatureReportLength(SafeFileHandle handle)
+    {
+        if (!HidD_GetPreparsedData(handle, out var preparsedData))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "HidD_GetPreparsedData завершился ошибкой");
+        var caps = Marshal.AllocHGlobal(64);
+        try
         {
-            CapturedReportKind.Output => StreamDeckPlusProfile.OutputReportLength,
-            CapturedReportKind.Feature => StreamDeckPlusProfile.FeatureReportLength,
-            _ => throw new IOException($"Неизвестный тип перехваченного report: {(byte)kind}"),
-        };
-        if (length != expected)
-            throw new IOException($"Драйвер вернул report длиной {length}, ожидалось {expected}");
-        capture = new CapturedReport(kind, output.AsSpan(CapturedHeaderLength, length).ToArray());
-        return true;
+            Marshal.Copy(new byte[64], 0, caps, 64);
+            var status = HidP_GetCaps(preparsedData, caps);
+            if (status < 0) throw new IOException($"HidP_GetCaps завершился с NTSTATUS 0x{status:X8}.");
+            return (ushort)Marshal.ReadInt16(caps, 8);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(caps);
+            HidD_FreePreparsedData(preparsedData);
+        }
     }
 
     public void Dispose() => _handle.Dispose();
@@ -120,14 +185,34 @@ internal sealed class HidDevice : IDisposable
         public IntPtr Reserved;
     }
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
-        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
-    [DllImport("kernel32.dll", SetLastError = true)]
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HiddAttributes
+    {
+        public int Size;
+        public ushort VendorId;
+        public ushort ProductId;
+        public ushort VersionNumber;
+    }
+
+    [DllImport("hid.dll")]
+    private static extern void HidD_GetHidGuid(out Guid guid);
+    [DllImport("hid.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeviceIoControl(SafeFileHandle device, uint controlCode,
-        byte[]? inputBuffer, int inputLength, [Out] byte[]? outputBuffer, int outputLength,
-        out int bytesReturned, IntPtr overlapped);
+    private static extern bool HidD_GetAttributes(SafeFileHandle handle, ref HiddAttributes attributes);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetPreparsedData(SafeFileHandle handle, out IntPtr preparsedData);
+    [DllImport("hid.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_FreePreparsedData(IntPtr preparsedData);
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetCaps(IntPtr preparsedData, IntPtr capabilities);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_GetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
+    [DllImport("hid.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool HidD_SetFeature(SafeFileHandle handle, byte[] reportBuffer, int reportBufferLength);
 
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);
@@ -143,13 +228,9 @@ internal sealed class HidDevice : IDisposable
     [DllImport("setupapi.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(string fileName, uint desiredAccess, uint shareMode,
+        IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
 }
 
-internal enum CapturedReportKind : byte
-{
-    None = 0,
-    Output = 1,
-    Feature = 2,
-}
-
-internal readonly record struct CapturedReport(CapturedReportKind Kind, byte[] Data);
+internal readonly record struct CapturedReport(PanelCaptureKind Kind, byte[] Data);

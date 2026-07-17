@@ -13,6 +13,9 @@ var tests = new (string Name, Action Run)[]
     ("partial window chunks", PartialWindowChunks),
     ("feature commands", FeatureCommands),
     ("invalid chunks rejected", InvalidChunksRejected),
+    ("panel input transport", PanelInputTransport),
+    ("panel capture transport", PanelCaptureTransport),
+    ("invalid panel transport rejected", InvalidPanelTransportRejected),
 };
 
 var failed = 0;
@@ -153,6 +156,74 @@ static void InvalidChunksRejected()
         OutputChunk(0x07, target: 0, chunk: 2, done: true, [1])));
 }
 
+static void PanelInputTransport()
+{
+    var input = new byte[StreamDeckPlusProfile.InputReportLength];
+    input[0] = StreamDeckPlusProfile.InputReportId;
+    for (var i = 1; i < input.Length; i++) input[i] = (byte)(i * 17);
+
+    var reports = PanelTransportProtocol.CreateInjectionReports(input, transaction: 41);
+    Equal(27, reports.Count);
+    var reassembled = new byte[input.Length];
+    for (var index = 0; index < reports.Count; index++)
+    {
+        var report = reports[index];
+        Equal(PanelTransportProtocol.ReportLength, report.Length);
+        Equal(PanelTransportProtocol.ReportId, report[0]);
+        Equal((byte)PanelTransportCommand.InjectChunk, report[5]);
+        Equal((byte)41, report[7]);
+        Equal((byte)index, report[8]);
+        Equal((byte)reports.Count, report[9]);
+        Equal((ushort)input.Length, BinaryPrimitives.ReadUInt16LittleEndian(report.AsSpan(11, 2)));
+        report.AsSpan(PanelTransportProtocol.HeaderLength, report[10])
+            .CopyTo(reassembled.AsSpan(index * PanelTransportProtocol.PayloadLength));
+    }
+    Bytes(input, reassembled);
+
+    var reset = PanelTransportProtocol.CreateResetReport();
+    Equal((byte)PanelTransportCommand.Reset, reset[5]);
+}
+
+static void PanelCaptureTransport()
+{
+    var output = new byte[StreamDeckPlusProfile.OutputReportLength];
+    output[0] = StreamDeckPlusProfile.OutputReportId;
+    for (var i = 1; i < output.Length; i++) output[i] = (byte)(i * 29);
+
+    var reports = PanelTransportProtocol.CreateCaptureReports(PanelCaptureKind.Output, output, transaction: 77);
+    Equal(54, reports.Count);
+    var reassembled = new byte[output.Length];
+    for (var index = 0; index < reports.Count; index++)
+    {
+        var chunk = PanelTransportProtocol.ParseResponse(reports[index]);
+        Equal(PanelTransportCommand.CaptureChunk, chunk.Command);
+        Equal(PanelCaptureKind.Output, chunk.Kind);
+        Equal((byte)77, chunk.Transaction);
+        Equal((byte)index, chunk.Index);
+        Equal((byte)reports.Count, chunk.Count);
+        chunk.Data.CopyTo(reassembled, index * PanelTransportProtocol.PayloadLength);
+    }
+    Bytes(output, reassembled);
+
+    var empty = new byte[PanelTransportProtocol.ReportLength];
+    PanelTransportProtocol.CreateResetReport().AsSpan(0, 5).CopyTo(empty);
+    Equal(PanelTransportCommand.None, PanelTransportProtocol.ParseResponse(empty).Command);
+}
+
+static void InvalidPanelTransportRejected()
+{
+    var invalidMagic = new byte[PanelTransportProtocol.ReportLength];
+    invalidMagic[0] = PanelTransportProtocol.ReportId;
+    Throws<InvalidDataException>(() => PanelTransportProtocol.ParseResponse(invalidMagic));
+
+    var capture = PanelTransportProtocol.CreateCaptureReports(
+        PanelCaptureKind.Feature,
+        new byte[StreamDeckPlusProfile.FeatureReportLength],
+        transaction: 1)[0];
+    capture[9]++;
+    Throws<InvalidDataException>(() => PanelTransportProtocol.ParseResponse(capture));
+}
+
 static byte[] OutputChunk(byte command, byte target, ushort chunk, bool done, byte[] data)
 {
     var report = new byte[StreamDeckPlusProfile.OutputReportLength];
@@ -172,9 +243,10 @@ static T Single<T>(IReadOnlyList<DeviceUpdate> updates) where T : DeviceUpdate
     return updates[0] as T ?? throw new Exception($"Expected {typeof(T).Name}, got {updates[0].GetType().Name}");
 }
 
-static void Equal<T>(T expected, T actual) where T : IEquatable<T>
+static void Equal<T>(T expected, T actual)
 {
-    if (!expected.Equals(actual)) throw new Exception($"Expected {expected}, got {actual}");
+    if (!EqualityComparer<T>.Default.Equals(expected, actual))
+        throw new Exception($"Expected {expected}, got {actual}");
 }
 
 static void Bytes(byte[] expected, byte[] actual)

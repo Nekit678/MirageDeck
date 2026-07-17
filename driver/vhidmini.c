@@ -18,8 +18,7 @@ Purpose:
 #define STREAMDECK_PID     0x0084
 #define STREAMDECK_VERSION 0x0200
 
-static const GUID G_PanelInterfaceGuid =
-    { 0x2f5e3a9c, 0x54a4, 0x4a18, { 0xa7, 0x3d, 0x61, 0xf4, 0x0e, 0xb0, 0xd9, 0x2b } };
+static const UCHAR PanelTransportMagic[4] = { 'M', 'D', 'P', '1' };
 static const WCHAR ManufacturerString[] = L"Elgato";
 static const WCHAR ProductString[] = L"Stream Deck +";
 static const WCHAR SerialString[] = L"AL00J2A00001";
@@ -28,7 +27,9 @@ static const UCHAR FirmwareAp2[8] = { '2', '.', '0', '.', '3', '.', '2', '0' };
 static const UCHAR FirmwareAp1[8] = { '2', '.', '0', '.', '0', '.', '0', '1' };
 
 /* Stream Deck + uses numbered reports. Counts exclude the report-ID byte:
- * input is 512 bytes total, output 1024, and every feature report 32. */
+ * input is 512 bytes total, output 1024, and every feature report 32.
+ * Report 0x0B is a panel-only feature transport because HID minidriver FDOs
+ * cannot be opened directly for custom IOCTLs. */
 static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0x06, 0x00, 0xFF,       /* Usage Page (vendor defined) */
     0x09, 0x01,
@@ -54,6 +55,7 @@ static HID_REPORT_DESCRIPTOR G_ReportDescriptor[] = {
     0x85, 0x07, 0x09, 0x03, 0x95, 0x1F, 0xB1, 0x02,
     0x85, 0x08, 0x09, 0x03, 0x95, 0x1F, 0xB1, 0x02,
     0x85, 0x0A, 0x09, 0x03, 0x95, 0x1F, 0xB1, 0x02,
+    0x85, 0x0B, 0x09, 0x03, 0x95, 0x1F, 0xB1, 0x02,
     0xC0
 };
 
@@ -69,12 +71,14 @@ static NTSTATUS SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static NTSTATUS GetInputReport(WDFREQUEST Request);
 static NTSTATUS GetString(WDFREQUEST Request);
-static NTSTATUS InjectInputRequest(PDEVICE_CONTEXT Context, WDFREQUEST Request);
-static NTSTATUS GetCaptureRequest(PDEVICE_CONTEXT Context, WDFREQUEST Request);
+static NTSTATUS SetPanelFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request, const HID_XFER_PACKET* Packet);
+static NTSTATUS GetPanelFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request);
 static VOID EnqueueInputLocked(PDEVICE_CONTEXT Context, const UCHAR* Report);
 static VOID EnqueueCaptureLocked(PDEVICE_CONTEXT Context, UCHAR Kind, const UCHAR* Report, USHORT Length);
 static NTSTATUS CopyInputReport(WDFREQUEST Request, const UCHAR* Report);
 static NTSTATUS SubmitInput(PDEVICE_CONTEXT Context, const UCHAR* Report);
+static BOOLEAN PanelReportHasMagic(const UCHAR* Report);
+static UCHAR GetPanelChunkCount(size_t Length);
 static VOID WriteLittleEndian16(UCHAR* Destination, USHORT Value);
 static VOID WriteLittleEndian32(UCHAR* Destination, ULONG Value);
 
@@ -114,8 +118,6 @@ EvtDeviceAdd(WDFDRIVER Driver, PWDFDEVICE_INIT DeviceInit)
     WDF_OBJECT_ATTRIBUTES_INIT(&lockAttributes);
     lockAttributes.ParentObject = device;
     status = WdfWaitLockCreate(&lockAttributes, &context->RingLock);
-    if (!NT_SUCCESS(status)) return status;
-    status = WdfDeviceCreateDeviceInterface(device, &G_PanelInterfaceGuid, NULL);
     if (!NT_SUCCESS(status)) return status;
     return CreateQueues(device);
 }
@@ -179,12 +181,6 @@ EvtIoDeviceControl(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     case IOCTL_HID_GET_STRING:
         status = GetString(Request);
         break;
-    case IOCTL_MIRAGE_INJECT_INPUT:
-        status = InjectInputRequest(context, Request);
-        break;
-    case IOCTL_MIRAGE_GET_CAPTURE:
-        status = GetCaptureRequest(context, Request);
-        break;
     case IOCTL_HID_ACTIVATE_DEVICE:
     case IOCTL_HID_DEACTIVATE_DEVICE:
         status = STATUS_SUCCESS;
@@ -239,6 +235,8 @@ SetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     UCHAR report[STREAMDECK_FEATURE_REPORT_SIZE];
     NTSTATUS status = RequestGetHidXferPacketToWrite(Request, &packet);
     if (!NT_SUCCESS(status)) return status;
+    if (packet.reportId == MIRAGE_PANEL_REPORT_ID)
+        return SetPanelFeature(Context, Request, &packet);
     if (packet.reportId != 0x03 || packet.reportBufferLen < STREAMDECK_FEATURE_REPORT_SIZE
         || packet.reportBuffer[0] != 0x03)
         return STATUS_INVALID_BUFFER_SIZE;
@@ -264,6 +262,8 @@ GetFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
     if (!NT_SUCCESS(status)) return status;
     if (packet.reportBufferLen < STREAMDECK_FEATURE_REPORT_SIZE)
         return STATUS_INVALID_BUFFER_SIZE;
+    if (packet.reportId == MIRAGE_PANEL_REPORT_ID)
+        return GetPanelFeature(Context, Request);
 
     RtlZeroMemory(report, sizeof(report));
     report[0] = packet.reportId;
@@ -322,35 +322,133 @@ GetInputReport(WDFREQUEST Request)
 }
 
 static NTSTATUS
-InjectInputRequest(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+SetPanelFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request, const HID_XFER_PACKET* Packet)
 {
-    WDFMEMORY memory;
-    const UCHAR* report;
-    size_t length;
-    NTSTATUS status = WdfRequestRetrieveInputMemory(Request, &memory);
-    if (!NT_SUCCESS(status)) return status;
-    report = (const UCHAR*)WdfMemoryGetBuffer(memory, &length);
-    if (length != STREAMDECK_INPUT_REPORT_SIZE || report[0] != 0x01)
+    const UCHAR* report = Packet->reportBuffer;
+    UCHAR completedReport[STREAMDECK_INPUT_REPORT_SIZE];
+    UCHAR index;
+    UCHAR count;
+    UCHAR payloadLength;
+    UCHAR expectedCount;
+    USHORT totalLength;
+    size_t offset;
+    size_t expectedLength;
+    BOOLEAN completed = FALSE;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (Packet->reportBufferLen < STREAMDECK_FEATURE_REPORT_SIZE
+        || report[0] != MIRAGE_PANEL_REPORT_ID
+        || !PanelReportHasMagic(report))
+        return STATUS_INVALID_PARAMETER;
+
+    if (report[5] == MIRAGE_PANEL_COMMAND_RESET) {
+        WdfWaitLockAcquire(Context->RingLock, NULL);
+        Context->InputAssemblyActive = FALSE;
+        Context->InputAssemblyNextChunk = 0;
+        Context->ActiveCaptureValid = FALSE;
+        Context->ActiveCaptureChunk = 0;
+        Context->CaptureHead = 0;
+        Context->CaptureCount = 0;
+        WdfWaitLockRelease(Context->RingLock);
+        WdfRequestSetInformation(Request, STREAMDECK_FEATURE_REPORT_SIZE);
+        return STATUS_SUCCESS;
+    }
+    if (report[5] != MIRAGE_PANEL_COMMAND_INJECT_CHUNK || report[6] != MIRAGE_CAPTURE_NONE)
+        return STATUS_INVALID_PARAMETER;
+
+    index = report[8];
+    count = report[9];
+    payloadLength = report[10];
+    totalLength = (USHORT)((USHORT)report[11] | ((USHORT)report[12] << 8));
+    expectedCount = GetPanelChunkCount(STREAMDECK_INPUT_REPORT_SIZE);
+    if (totalLength != STREAMDECK_INPUT_REPORT_SIZE || count != expectedCount || index >= count)
         return STATUS_INVALID_BUFFER_SIZE;
-    status = SubmitInput(Context, report);
-    if (NT_SUCCESS(status)) WdfRequestSetInformation(Request, length);
-    return status;
+    offset = (size_t)index * MIRAGE_PANEL_PAYLOAD_SIZE;
+    expectedLength = STREAMDECK_INPUT_REPORT_SIZE - offset;
+    if (expectedLength > MIRAGE_PANEL_PAYLOAD_SIZE) expectedLength = MIRAGE_PANEL_PAYLOAD_SIZE;
+    if (payloadLength != expectedLength)
+        return STATUS_INVALID_BUFFER_SIZE;
+
+    WdfWaitLockAcquire(Context->RingLock, NULL);
+    if (index == 0) {
+        Context->InputAssemblyActive = TRUE;
+        Context->InputAssemblyTransaction = report[7];
+        Context->InputAssemblyNextChunk = 0;
+    }
+    if (!Context->InputAssemblyActive
+        || Context->InputAssemblyTransaction != report[7]
+        || Context->InputAssemblyNextChunk != index) {
+        status = STATUS_INVALID_DEVICE_STATE;
+    } else {
+        RtlCopyMemory(Context->InputAssembly + offset, report + MIRAGE_PANEL_HEADER_SIZE, payloadLength);
+        Context->InputAssemblyNextChunk++;
+        if (Context->InputAssemblyNextChunk == count) {
+            RtlCopyMemory(completedReport, Context->InputAssembly, sizeof(completedReport));
+            Context->InputAssemblyActive = FALSE;
+            completed = TRUE;
+        }
+    }
+    WdfWaitLockRelease(Context->RingLock);
+
+    if (!NT_SUCCESS(status)) return status;
+    if (completed) {
+        if (completedReport[0] != 0x01) return STATUS_INVALID_PARAMETER;
+        status = SubmitInput(Context, completedReport);
+        if (!NT_SUCCESS(status)) return status;
+    }
+    WdfRequestSetInformation(Request, STREAMDECK_FEATURE_REPORT_SIZE);
+    return STATUS_SUCCESS;
 }
 
 static NTSTATUS
-GetCaptureRequest(PDEVICE_CONTEXT Context, WDFREQUEST Request)
+GetPanelFeature(PDEVICE_CONTEXT Context, WDFREQUEST Request)
 {
-    MIRAGE_CAPTURED_REPORT capture;
-    RtlZeroMemory(&capture, sizeof(capture));
+    UCHAR report[STREAMDECK_FEATURE_REPORT_SIZE];
+    USHORT totalLength;
+    UCHAR count;
+    UCHAR index;
+    size_t offset;
+    size_t payloadLength;
+
+    RtlZeroMemory(report, sizeof(report));
+    report[0] = MIRAGE_PANEL_REPORT_ID;
+    RtlCopyMemory(report + 1, PanelTransportMagic, sizeof(PanelTransportMagic));
+    report[5] = MIRAGE_PANEL_COMMAND_NONE;
 
     WdfWaitLockAcquire(Context->RingLock, NULL);
-    if (Context->CaptureCount != 0) {
-        RtlCopyMemory(&capture, &Context->CaptureRing[Context->CaptureHead], sizeof(capture));
+    if (!Context->ActiveCaptureValid && Context->CaptureCount != 0) {
+        RtlCopyMemory(&Context->ActiveCapture,
+            &Context->CaptureRing[Context->CaptureHead], sizeof(Context->ActiveCapture));
         Context->CaptureHead = (Context->CaptureHead + 1) % STREAMDECK_RING_CAPACITY;
         Context->CaptureCount--;
+        Context->ActiveCaptureChunk = 0;
+        Context->ActiveCaptureTransaction++;
+        if (Context->ActiveCaptureTransaction == 0) Context->ActiveCaptureTransaction++;
+        Context->ActiveCaptureValid = TRUE;
+    }
+    if (Context->ActiveCaptureValid) {
+        totalLength = Context->ActiveCapture.Length;
+        count = GetPanelChunkCount(totalLength);
+        index = Context->ActiveCaptureChunk;
+        offset = (size_t)index * MIRAGE_PANEL_PAYLOAD_SIZE;
+        payloadLength = totalLength - offset;
+        if (payloadLength > MIRAGE_PANEL_PAYLOAD_SIZE) payloadLength = MIRAGE_PANEL_PAYLOAD_SIZE;
+
+        report[5] = MIRAGE_PANEL_COMMAND_CAPTURE_CHUNK;
+        report[6] = Context->ActiveCapture.Kind;
+        report[7] = Context->ActiveCaptureTransaction;
+        report[8] = index;
+        report[9] = count;
+        report[10] = (UCHAR)payloadLength;
+        WriteLittleEndian16(report + 11, totalLength);
+        RtlCopyMemory(report + MIRAGE_PANEL_HEADER_SIZE,
+            Context->ActiveCapture.Data + offset, payloadLength);
+
+        Context->ActiveCaptureChunk++;
+        if (Context->ActiveCaptureChunk == count) Context->ActiveCaptureValid = FALSE;
     }
     WdfWaitLockRelease(Context->RingLock);
-    return RequestCopyFromBuffer(Request, &capture, sizeof(capture));
+    return RequestCopyFromBuffer(Request, report, sizeof(report));
 }
 
 static NTSTATUS
@@ -401,6 +499,21 @@ EnqueueCaptureLocked(PDEVICE_CONTEXT Context, UCHAR Kind, const UCHAR* Report, U
     capture->Length = Length;
     RtlCopyMemory(capture->Data, Report, Length);
     Context->CaptureCount++;
+}
+
+static BOOLEAN
+PanelReportHasMagic(const UCHAR* Report)
+{
+    return Report[1] == PanelTransportMagic[0]
+        && Report[2] == PanelTransportMagic[1]
+        && Report[3] == PanelTransportMagic[2]
+        && Report[4] == PanelTransportMagic[3];
+}
+
+static UCHAR
+GetPanelChunkCount(size_t Length)
+{
+    return (UCHAR)((Length + MIRAGE_PANEL_PAYLOAD_SIZE - 1) / MIRAGE_PANEL_PAYLOAD_SIZE);
 }
 
 static NTSTATUS

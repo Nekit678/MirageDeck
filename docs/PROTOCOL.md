@@ -15,12 +15,11 @@
 | Usage page / usage | vendor-defined `FF00:0001` |
 | Input report | ID `01`, 512 байт вместе с ID |
 | Output report | ID `02`, 1024 байта вместе с ID |
-| Feature reports | IDs `03..08`, `0A`, по 32 байта вместе с ID |
+| Feature reports | аппаратные IDs `03..08`, `0A`; служебный ID `0B`; все по 32 байта вместе с ID |
 
 В descriptor report count не включает report ID: `511`, `1023` и `31` байт
-соответственно. Панель не добавляет приватные HID reports: служебный обмен идёт
-через отдельный device interface `{2F5E3A9C-54A4-4A18-A73D-61F40EB0D92B}` и
-два private IOCTL. Поэтому `HidP_GetCaps` видит аппаратные размеры Stream Deck +.
+соответственно. Служебный Feature report `0B` имеет тот же размер 32 байта,
+поэтому `HidP_GetCaps` сохраняет аппаратные максимумы Stream Deck +.
 
 ## Input reports
 
@@ -103,10 +102,28 @@ Getter reports:
 ## Служебный канал панели
 
 Драйвер перехватывает output и setter feature reports в кольцевую очередь на
-128 элементов. `IOCTL_MIRAGE_GET_CAPTURE` возвращает один report либо kind `0`,
-если очередь пуста. `IOCTL_MIRAGE_INJECT_INPUT` принимает ровно 512 байт с ID
-`01` и завершает ожидающий HID read; если read ещё не выставлен, input report
-сохраняется в отдельной кольцевой очереди.
+128 элементов. Панель открывает публичную HID collection и использует Feature
+report ID `0B`, поскольку FDO HID-минидрайвера нельзя открыть напрямую для
+custom IOCTL.
 
-Такой канал не использует feature report с увеличенным размером: приложение
-Elgato продолжает работать с документированным максимумом 32 байта.
+Каждый служебный report имеет 13-байтовый заголовок и 19 байт данных:
+
+```text
+offset  size  значение
+00      1     report ID = 0B
+01      4     magic = "MDP1"
+05      1     command: 00 none, 01 inject, 02 reset, 03 capture
+06      1     capture kind: 00 none, 01 output, 02 feature
+07      1     transaction
+08      1     chunk index
+09      1     chunk count
+0A      1     data length
+0B      2     total length
+0D      19    data
+```
+
+Input report на 512 байт передаётся последовательностью из 27 setter Feature
+reports. Перехваченный output report на 1024 байта возвращается 54 getter
+Feature reports, а setter feature report — двумя. `reset` сбрасывает незавершённые
+транзакции и старую очередь при подключении панели. Приложение Elgato продолжает
+работать с документированным максимальным Feature report размером 32 байта.

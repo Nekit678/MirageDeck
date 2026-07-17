@@ -19,8 +19,8 @@
   прямоугольной области;
 - feature reports: логотип, заливка LCD/клавиши, яркость и таймер сна;
 - ответы на запросы firmware, серийного номера, geometry и sleep duration;
-- изолированный служебный device interface между драйвером и панелью — он не
-  меняет публичные размеры HID reports;
+- служебный Feature report между драйвером и панелью с 32-байтовым chunking —
+  он не меняет максимальные публичные размеры HID reports;
 - автономные кроссплатформенные тесты кодека протокола.
 
 Форматы реализованы по официальной документации
@@ -80,7 +80,7 @@ dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 ```mermaid
 flowchart LR
     APP[Elgato Stream Deck app] <-->|HID reports| DRV[UMDF 2 virtual HID]
-    DRV <-->|private IOCTL channel| PANEL[WinForms panel]
+    DRV <-->|panel Feature report 0B| PANEL[WinForms panel]
     PANEL --> CORE[Stream Deck + codec]
     CORE --> UI[8 keys · touch strip · 4 encoders]
 ```

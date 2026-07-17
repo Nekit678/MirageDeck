@@ -62,7 +62,7 @@ internal sealed class MainForm : Form
                 for (var i = 0; i < 64 && _device!.TryReadCapture(out var capture); i++)
                 {
                     received = true;
-                    var updates = capture.Kind == CapturedReportKind.Output
+                    var updates = capture.Kind == PanelCaptureKind.Output
                         ? _decoder.PushOutput(capture.Data)
                         : _decoder.PushFeature(capture.Data);
                     foreach (var update in updates)

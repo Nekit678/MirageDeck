@@ -18,8 +18,8 @@ encoders in a separate WinForms panel.
   rectangular touch-strip region;
 - feature reports for logo, LCD/key color fill, brightness, and sleep duration;
 - firmware, serial number, unit geometry, and sleep-duration responses;
-- a private driver/panel device interface that does not alter public HID report
-  sizes;
+- a 32-byte chunked panel feature report that does not alter the maximum public
+  HID report sizes;
 - cross-platform protocol codec tests.
 
 The implementation follows Elgato's official
@@ -79,7 +79,7 @@ dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 ```mermaid
 flowchart LR
     APP[Elgato Stream Deck app] <-->|HID reports| DRV[UMDF 2 virtual HID]
-    DRV <-->|private IOCTL channel| PANEL[WinForms panel]
+    DRV <-->|panel Feature report 0B| PANEL[WinForms panel]
     PANEL --> CORE[Stream Deck + codec]
     CORE --> UI[8 keys · touch strip · 4 encoders]
 ```

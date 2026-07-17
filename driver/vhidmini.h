@@ -35,6 +35,14 @@ typedef struct _DEVICE_CONTEXT {
     MIRAGE_CAPTURED_REPORT CaptureRing[STREAMDECK_RING_CAPACITY];
     ULONG CaptureHead;
     ULONG CaptureCount;
+    MIRAGE_CAPTURED_REPORT ActiveCapture;
+    UCHAR ActiveCaptureTransaction;
+    UCHAR ActiveCaptureChunk;
+    BOOLEAN ActiveCaptureValid;
+    UCHAR InputAssembly[STREAMDECK_INPUT_REPORT_SIZE];
+    UCHAR InputAssemblyTransaction;
+    UCHAR InputAssemblyNextChunk;
+    BOOLEAN InputAssemblyActive;
     LONG SleepDurationSeconds;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
