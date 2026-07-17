@@ -12,6 +12,7 @@
 #include <initguid.h>
 #include <usbiodef.h>
 #include <usbioctl.h>
+#include <hidport.h>
 #include <ude/1.0/UdeCx.h>
 #include <ntstrsafe.h>
 #include <wdmsec.h>
