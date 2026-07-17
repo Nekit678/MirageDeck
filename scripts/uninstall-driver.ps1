@@ -29,7 +29,7 @@ $devices = @(
         -InstanceId $_.InstanceId `
         -KeyName "DEVPKEY_Device_HardwareIds" `
         -ErrorAction SilentlyContinue
-      @($hardwareIds.Data) -contains "Root\MiraboxN4Pro"
+      @($hardwareIds.Data) -contains "Root\StreamDeckPlusEmulator"
     }
 )
 if ($devices.Count -eq 0) {
@@ -49,7 +49,7 @@ if ($RemoveDriverPackage) {
   try {
     $driverPackages = @(
       Get-WindowsDriver -Online |
-        Where-Object { [IO.Path]::GetFileName($_.OriginalFileName) -ieq "MiraboxN4Pro.inf" }
+        Where-Object { [IO.Path]::GetFileName($_.OriginalFileName) -ieq "StreamDeckPlusEmulator.inf" }
     )
     if ($driverPackages.Count -eq 0) {
       Write-Host "Driver Store: package not found (already removed)."

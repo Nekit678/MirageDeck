@@ -21,8 +21,56 @@ function Get-MirageDeckRootDevice {
         -InstanceId $_.InstanceId `
         -KeyName "DEVPKEY_Device_HardwareIds" `
         -ErrorAction SilentlyContinue
-      @($hardwareIds.Data) -contains "Root\MiraboxN4Pro"
+      @($hardwareIds.Data) -contains "Root\StreamDeckPlusEmulator"
     }
+}
+
+function Get-DeviceClassGuid {
+  param([Parameter(Mandatory)]$Device)
+  $property = Get-PnpDeviceProperty `
+    -InstanceId $Device.InstanceId `
+    -KeyName "DEVPKEY_Device_ClassGuid" `
+    -ErrorAction SilentlyContinue
+  if ($property.Data) { return $property.Data.ToString() }
+  return ""
+}
+
+function Get-DriverInitializationDetails {
+  param([Parameter(Mandatory)]$Device)
+  $details = [ordered]@{
+    InstanceId = $Device.InstanceId
+    ProblemCode = "unknown"
+    ProblemStatus = "unknown"
+    Stage = "not recorded"
+    InitializationStatus = "not recorded"
+  }
+  $problemCode = Get-PnpDeviceProperty `
+    -InstanceId $Device.InstanceId `
+    -KeyName "DEVPKEY_Device_ProblemCode" `
+    -ErrorAction SilentlyContinue
+  if ($null -ne $problemCode -and $null -ne $problemCode.Data) {
+    $details.ProblemCode = $problemCode.Data.ToString()
+  }
+  $problemStatus = Get-PnpDeviceProperty `
+    -InstanceId $Device.InstanceId `
+    -KeyName "DEVPKEY_Device_ProblemStatus" `
+    -ErrorAction SilentlyContinue
+  if ($null -ne $problemStatus -and $null -ne $problemStatus.Data) {
+    $details.ProblemStatus = "0x{0:X8}" -f `
+      ([Convert]::ToInt64($problemStatus.Data) -band 4294967295)
+  }
+  $parametersPath = "Registry::HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Enum\$($Device.InstanceId)\Device Parameters"
+  $parameters = Get-ItemProperty -LiteralPath $parametersPath -ErrorAction SilentlyContinue
+  if ($null -ne $parameters) {
+    $stageProperty = $parameters.PSObject.Properties["MirageDeckInitializationStage"]
+    if ($null -ne $stageProperty) { $details.Stage = $stageProperty.Value.ToString() }
+    $statusProperty = $parameters.PSObject.Properties["MirageDeckInitializationStatus"]
+    if ($null -ne $statusProperty) {
+      $details.InitializationStatus = "0x{0:X8}" -f `
+        ([Convert]::ToInt64($statusProperty.Value) -band 4294967295)
+    }
+  }
+  return [PSCustomObject]$details
 }
 
 function Test-CertificateInStore {
@@ -55,6 +103,27 @@ if (Test-Path -LiteralPath $packageInfoPath -PathType Leaf) {
   }
 }
 
+if ($packageInfo -and $packageInfo.driverKind -eq "kernel-ude") {
+  $systemStartOptions = (Get-ItemProperty `
+    -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Control" `
+    -Name SystemStartOptions `
+    -ErrorAction SilentlyContinue).SystemStartOptions
+  if ($systemStartOptions -notmatch '(^|\s)TESTSIGNING(\s|$)') {
+    throw @"
+This development package contains a self-signed kernel-mode UDE driver.
+Windows Test Mode is not active, so Windows would refuse to start it.
+
+To enable it, run in an elevated PowerShell:
+  bcdedit.exe /set testsigning on
+Then restart Windows and run this installer again.
+
+If Windows reports that Secure Boot policy protects this setting, disable
+Secure Boot in the firmware first. Production packages require Microsoft
+driver signing and do not use Test Mode.
+"@
+  }
+}
+
 if (-not $DriverDirectory) {
   $DriverDirectory = if ($packageInfo) {
     Join-Path $packageRoot "driver"
@@ -62,8 +131,8 @@ if (-not $DriverDirectory) {
     Join-Path (Split-Path -Parent $PSScriptRoot) "driver\x64\Debug"
   }
 }
-$inf = Get-ChildItem $DriverDirectory -Filter MiraboxN4Pro.inf -File -Recurse | Select-Object -First 1
-if (-not $inf) { throw "MiraboxN4Pro.inf was not found under $DriverDirectory" }
+$inf = Get-ChildItem $DriverDirectory -Filter StreamDeckPlusEmulator.inf -File -Recurse | Select-Object -First 1
+if (-not $inf) { throw "StreamDeckPlusEmulator.inf was not found under $DriverDirectory" }
 if ($packageInfo) {
   $expectedInf = [IO.Path]::GetFullPath((Join-Path $packageRoot $packageInfo.driverInf))
   if ($inf.FullName -ne $expectedInf) {
@@ -141,26 +210,58 @@ if (-not ([System.Management.Automation.PSTypeName]'Mirabox.Emulator.Install.Roo
   Add-Type -Path $helperPath
 }
 
-if ($existingDevices.Count -gt 0) {
+if ($existingDevices.Count -gt 0 -and @(
+    $existingDevices | Where-Object {
+      (Get-DeviceClassGuid $_) -ne "{36fc9e60-c465-11cf-8056-444553540000}"
+    }
+  ).Count -gt 0) {
+  Write-Host "Replacing the legacy HID-class root device with a USB-class controller..."
+  foreach ($device in $existingDevices) {
+    Invoke-Native -FilePath "pnputil.exe" -Arguments @("/remove-device", $device.InstanceId)
+  }
+  $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
+    $inf.FullName,
+    "Root\StreamDeckPlusEmulator"
+  )
+} elseif ($existingDevices.Count -gt 0) {
   Write-Host "Updating driver for $($existingDevices.Count) existing MirageDeck virtual device(s)..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Update(
     $inf.FullName,
-    "Root\MiraboxN4Pro"
+    "Root\StreamDeckPlusEmulator"
   )
   foreach ($device in $existingDevices) {
     Invoke-Native -FilePath "pnputil.exe" -Arguments @("/restart-device", $device.InstanceId)
   }
 } else {
-  Write-Host "Creating the persistent MirageDeck virtual HID device..."
+  Write-Host "Creating the persistent MirageDeck virtual USB controller..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
     $inf.FullName,
-    "Root\MiraboxN4Pro"
+    "Root\StreamDeckPlusEmulator"
   )
 }
 Invoke-Native -FilePath "pnputil.exe" -Arguments @("/scan-devices")
 
 if ($rebootRequired) {
-  Write-Host "The MirageDeck virtual HID was installed. Restart Windows before launching the panel."
+  Write-Host "The MirageDeck virtual USB device was installed. Restart Windows before launching the panel."
 } else {
-  Write-Host "The MirageDeck virtual HID was installed. Launch the panel, then Stream Dock."
+  $usbDevice = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+    Where-Object InstanceId -Like "USB\VID_0FD9&PID_0084*" |
+    Select-Object -First 1
+  if (-not $usbDevice -or $usbDevice.Status -ne "OK") {
+    $controller = Get-MirageDeckRootDevice | Select-Object -First 1
+    if ($controller) {
+      $details = Get-DriverInitializationDetails $controller
+      throw @"
+The driver package was installed, but USB\VID_0FD9&PID_0084 did not start correctly.
+Controller: $($details.InstanceId)
+PnP problem code: $($details.ProblemCode)
+PnP problem status: $($details.ProblemStatus)
+Driver initialization stage: $($details.Stage)
+Driver initialization status: $($details.InitializationStatus)
+"@
+    }
+    throw "The driver package was installed, but the MirageDeck controller and USB\\VID_0FD9&PID_0084 were not found."
+  }
+  Write-Host "The MirageDeck virtual USB device was installed as $($usbDevice.InstanceId)."
+  Write-Host "Launch the panel, then the Elgato Stream Deck app."
 }

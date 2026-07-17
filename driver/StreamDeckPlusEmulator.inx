@@ -1,0 +1,52 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=USB
+ClassGuid={36FC9E60-C465-11CF-8056-444553540000}
+Provider=%Provider%
+DriverVer=07/17/2026,1.0.16.0
+CatalogFile=StreamDeckPlusEmulator.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir=13
+
+[SourceDisksNames]
+1=%DiskName%,,,
+
+[SourceDisksFiles]
+StreamDeckPlusEmulator.sys=1
+
+[Manufacturer]
+%Manufacturer%=Models,NT$ARCH$.10.0...22000
+
+[Models.NT$ARCH$.10.0...22000]
+%DeviceDesc%=StreamDeckPlusEmulator,Root\StreamDeckPlusEmulator
+
+[StreamDeckPlusEmulator.NT]
+CopyFiles=DriverCopy
+
+[DriverCopy]
+StreamDeckPlusEmulator.sys
+
+[StreamDeckPlusEmulator.NT.Services]
+AddService=StreamDeckPlusEmulator,0x00000002,DriverService
+
+[DriverService]
+DisplayName=%ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary="%13%\StreamDeckPlusEmulator.sys"
+
+[StreamDeckPlusEmulator.NT.Wdf]
+KmdfService=StreamDeckPlusEmulator,DriverInstall
+
+[DriverInstall]
+KmdfLibraryVersion=$KMDFVERSION$
+
+[Strings]
+Provider="MirageDeck Project"
+Manufacturer="MirageDeck Project"
+DiskName="MirageDeck virtual USB installation media"
+DeviceDesc="MirageDeck Virtual USB controller for Elgato Stream Deck +"
+ServiceDesc="MirageDeck Stream Deck + USB emulator"

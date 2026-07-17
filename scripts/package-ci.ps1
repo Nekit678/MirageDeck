@@ -64,11 +64,11 @@ Write-Host "[package] Validating the SetupAPI root-device helper"
 Add-Type -Path "scripts/RootDeviceInstaller.cs"
 Write-Host "[package] Locating build outputs"
 
-$driverDll = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.dll -File -Recurse |
+$driverBinary = Get-ChildItem $DriverSearchRoot -Filter StreamDeckPlusEmulator.sys -File -Recurse |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-$driverInf = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.inf -File -Recurse |
+$driverInf = Get-ChildItem $DriverSearchRoot -Filter StreamDeckPlusEmulator.inf -File -Recurse |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-if (-not $driverDll -or -not $driverInf) { throw "Built MiraboxN4Pro.dll/inf files were not found under $DriverSearchRoot" }
+if (-not $driverBinary -or -not $driverInf) { throw "Built StreamDeckPlusEmulator.sys/inf files were not found under $DriverSearchRoot" }
 
 Remove-Item $OutputDirectory -Recurse -Force -ErrorAction SilentlyContinue
 $driverOutput = Join-Path $OutputDirectory "driver"
@@ -76,12 +76,11 @@ $panelOutput = Join-Path $OutputDirectory "panel"
 $scriptsOutput = Join-Path $OutputDirectory "scripts"
 New-Item $driverOutput, $panelOutput, $scriptsOutput -ItemType Directory -Force | Out-Null
 Write-Host "[package] Copying panel, driver, scripts, and documentation"
-Copy-Item $driverDll.FullName, $driverInf.FullName -Destination $driverOutput
+Copy-Item $driverBinary.FullName, $driverInf.FullName -Destination $driverOutput
 Copy-Item (Join-Path $PanelPublishDirectory "*") -Destination $panelOutput -Recurse
 Copy-Item "scripts/install-driver.ps1", "scripts/RootDeviceInstaller.cs", "scripts/uninstall-driver.ps1", "scripts/verify-package.ps1" -Destination $scriptsOutput
 Copy-Item "DISTRIBUTION.md" -Destination (Join-Path $OutputDirectory "START-HERE.md")
 Copy-Item "LICENSE", "THIRD_PARTY_NOTICES.md" -Destination $OutputDirectory
-Copy-Item "driver/LICENSE-MS-PL" -Destination $driverOutput
 
 Write-Host "[package] Creating ephemeral test-signing certificate"
 $certificate = $null
@@ -109,9 +108,9 @@ try {
   $inf2Cat = Find-WdkTool "inf2cat.exe"
   Write-Host "[package] SignTool: $signTool"
   Write-Host "[package] Inf2Cat: $inf2Cat"
-  $packagedDll = Join-Path $driverOutput "MiraboxN4Pro.dll"
-  $packagedInf = Join-Path $driverOutput "MiraboxN4Pro.inf"
-  $catalog = Join-Path $driverOutput "MiraboxN4Pro.cat"
+  $packagedDriver = Join-Path $driverOutput "StreamDeckPlusEmulator.sys"
+  $packagedInf = Join-Path $driverOutput "StreamDeckPlusEmulator.inf"
+  $catalog = Join-Path $driverOutput "StreamDeckPlusEmulator.cat"
   $panelExecutables = @(Get-ChildItem $panelOutput -Filter *.exe -File -Recurse)
   if ($panelExecutables.Count -ne 1) {
     throw "Expected one panel executable, found $($panelExecutables.Count)"
@@ -128,17 +127,17 @@ try {
     throw "Panel version $panelFileVersion does not match DriverVer $packageVersion"
   }
 
-  # The catalog hashes the driver binary, so embed-sign the DLL first, create
+  # The catalog hashes the driver binary, so embed-sign the SYS first, create
   # the catalog second, and sign the completed catalog last.
-  Write-Host "[package] Signing driver DLL and panel executable"
-  Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $packagedDll
+  Write-Host "[package] Signing kernel driver and panel executable"
+  Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $packagedDriver
   Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $panelExecutable.FullName
   Write-Host "[package] Creating driver catalog"
   Invoke-Native $inf2Cat "/driver:$driverOutput" /os:10_X64 /uselocaltime
-  if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create MiraboxN4Pro.cat" }
+  if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create StreamDeckPlusEmulator.cat" }
   Write-Host "[package] Signing and verifying catalog"
   Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $catalog
-  Assert-SignedBy $packagedDll $certificate.Thumbprint
+  Assert-SignedBy $packagedDriver $certificate.Thumbprint
   Assert-SignedBy $catalog $certificate.Thumbprint
   Assert-SignedBy $panelExecutable.FullName $certificate.Thumbprint
 
@@ -146,14 +145,15 @@ try {
   $packageRoot = (Resolve-Path $OutputDirectory).Path
   $panelRelative = [IO.Path]::GetRelativePath($packageRoot, $panelExecutable.FullName).Replace('\', '/')
   $packageInfo = [ordered]@{
-    schemaVersion = 1
+    schemaVersion = 2
     product = "MirageDeck"
     packageKind = "development"
     version = $packageVersion
-    hardwareId = "Root\MiraboxN4Pro"
-    driverInf = "driver/MiraboxN4Pro.inf"
-    driverBinary = "driver/MiraboxN4Pro.dll"
-    driverCatalog = "driver/MiraboxN4Pro.cat"
+    hardwareId = "Root\StreamDeckPlusEmulator"
+    driverKind = "kernel-ude"
+    driverInf = "driver/StreamDeckPlusEmulator.inf"
+    driverBinary = "driver/StreamDeckPlusEmulator.sys"
+    driverCatalog = "driver/StreamDeckPlusEmulator.cat"
     panelExecutable = $panelRelative
     certificateFile = "driver/MirageDeck-CI-Test.cer"
     certificateSubject = $certificate.Subject

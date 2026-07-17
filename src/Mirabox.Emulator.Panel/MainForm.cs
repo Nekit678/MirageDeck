@@ -1,6 +1,4 @@
 using Mirabox.Emulator.Core;
-using System.Drawing.Imaging;
-using System.Runtime.InteropServices;
 
 namespace Mirabox.Emulator.Panel;
 
@@ -8,14 +6,13 @@ internal sealed class MainForm : Form
 {
     private readonly DeviceSurface _surface = new() { Dock = DockStyle.Fill };
     private readonly StatusBanner _status = new() { Dock = DockStyle.Bottom, Height = 64 };
-    private readonly MiraboxProtocolDecoder _decoder = new();
+    private readonly StreamDeckPlusProtocolDecoder _decoder = new();
     private readonly CancellationTokenSource _shutdown = new();
     private HidDevice? _device;
-    private bool _hasProtocolTouchMode;
 
     public MainForm()
     {
-        Text = "MirageDeck — N4 Pro-совместимая виртуальная панель";
+        Text = "MirageDeck — виртуальный Elgato Stream Deck +";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(740, 530);
         ClientSize = new Size(900, 600);
@@ -34,8 +31,8 @@ internal sealed class MainForm : Form
     {
         try
         {
-            _device = HidDevice.OpenN4Pro();
-            SetStatus("HID 5548:1021 (Global) готов к работе", StatusKind.Success);
+            _device = HidDevice.OpenStreamDeckPlus();
+            SetStatus("HID 0FD9:0084 (Stream Deck +) готов к работе", StatusKind.Success);
             _ = Task.Run(() => PollAsync(_shutdown.Token));
         }
         catch (Exception error)
@@ -62,10 +59,13 @@ internal sealed class MainForm : Form
             while (!cancellationToken.IsCancellationRequested)
             {
                 var received = false;
-                for (var i = 0; i < 64 && _device!.TryReadOutput(out var packet); i++)
+                for (var i = 0; i < 64 && _device!.TryReadCapture(out var capture); i++)
                 {
                     received = true;
-                    foreach (var update in _decoder.Push(packet))
+                    var updates = capture.Kind == PanelCaptureKind.Output
+                        ? _decoder.PushOutput(capture.Data)
+                        : _decoder.PushFeature(capture.Data);
+                    foreach (var update in updates)
                         BeginInvoke(() => Apply(update));
                 }
                 if (!received) await Task.Delay(8, cancellationToken);
@@ -82,98 +82,59 @@ internal sealed class MainForm : Form
     {
         switch (update)
         {
-        case ImageUpdate image:
-            var index = N4ProProfile.UiKeyForImageSlot(image.Slot);
-            if (index >= 0)
-            {
-                _surface.SetKeyImage(index, DecodeImage(image.EncodedImage));
-                SetStatus($"Изображение кнопки {index + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
-            }
-            else
-            {
-                var secondary = N4ProProfile.SecondaryKeyForImageSlot(image.Slot);
-                if (secondary >= 0)
-                {
-                    if (!_hasProtocolTouchMode) SetTouchMode(touchBar: false);
-                    _surface.SetSecondaryImage(secondary, DecodeImage(image.EncodedImage));
-                    SetStatus($"Изображение touch-кнопки {secondary + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
-                }
-            }
+        case ButtonImageUpdate image:
+            _surface.SetKeyImage(image.Button, DecodeImage(image.EncodedImage));
+            SetStatus($"Изображение клавиши {image.Button + 1}: {image.EncodedImage.Length:N0} байт", StatusKind.Activity);
             break;
-        case BackgroundUpdate background:
-            if (!_hasProtocolTouchMode) SetTouchMode(touchBar: true);
-            _surface.SetBackground(DecodeImage(background.EncodedImage));
-            SetStatus($"Фон обновлён: {background.EncodedImage.Length:N0} байт", StatusKind.Activity);
+        case FullScreenImageUpdate fullScreen:
+            _surface.SetFullScreenImage(DecodeImage(fullScreen.EncodedImage));
+            SetStatus($"Полный LCD-кадр: {fullScreen.EncodedImage.Length:N0} байт", StatusKind.Activity);
+            break;
+        case WindowImageUpdate window:
+            _surface.SetWindowImage(DecodeImage(window.EncodedImage));
+            SetStatus($"Touch strip обновлён: {window.EncodedImage.Length:N0} байт", StatusKind.Activity);
+            break;
+        case PartialWindowImageUpdate partial:
+            _surface.SetPartialWindowImage(
+                new Rectangle(partial.X, partial.Y, partial.Width, partial.Height),
+                DecodeImage(partial.EncodedImage));
+            SetStatus($"Touch strip: область {partial.X},{partial.Y} {partial.Width}×{partial.Height}", StatusKind.Activity);
             break;
         case BrightnessUpdate brightness:
             _surface.Brightness = brightness.Value;
             _surface.Invalidate();
             SetStatus($"Яркость экрана: {brightness.Value}%", StatusKind.Activity);
             break;
-        case ClearKeyUpdate clear:
-            var main = N4ProProfile.UiKeyForImageSlot(clear.Slot);
-            if (main >= 0) _surface.ClearKey(main);
-            else _surface.ClearSecondaryImage(N4ProProfile.SecondaryKeyForImageSlot(clear.Slot));
+        case ShowLogoUpdate:
+            _surface.ShowLogo();
             break;
-        case ClearAllUpdate:
-            _surface.ClearAll();
+        case FillLcdColorUpdate fillLcd:
+            _surface.FillLcd(Color.FromArgb(fillLcd.Red, fillLcd.Green, fillLcd.Blue));
+            SetStatus($"LCD заполнен цветом #{fillLcd.Red:X2}{fillLcd.Green:X2}{fillLcd.Blue:X2}", StatusKind.Activity);
             break;
-        case WakeUpdate:
-            SetStatus("Экран включён", StatusKind.Success);
+        case FillButtonColorUpdate fillButton:
+            _surface.FillKey(fillButton.Button, Color.FromArgb(fillButton.Red, fillButton.Green, fillButton.Blue));
+            SetStatus($"Клавиша {fillButton.Button + 1} заполнена цветом", StatusKind.Activity);
             break;
-        case TouchModeUpdate mode:
-            _hasProtocolTouchMode = true;
-            SetTouchMode(mode.TouchBar);
+        case SleepDurationUpdate sleep:
+            SetStatus(sleep.Seconds == 0
+                ? "Автоматический сон отключён"
+                : $"Таймер сна: {sleep.Seconds} с", StatusKind.Activity);
+            break;
+        case UnknownCommandUpdate unknown:
+            SetStatus($"Неизвестный HID report: {Convert.ToHexString(unknown.Report.AsSpan(0, Math.Min(8, unknown.Report.Length)))}",
+                StatusKind.Activity);
             break;
         }
     }
-
-    private void SetTouchMode(bool touchBar) =>
-        _surface.SetTouchMode(touchBar ? TouchDisplayMode.TouchBar : TouchDisplayMode.Button);
 
     private void SetStatus(string message, StatusKind kind) => _status.SetStatus(message, kind);
 
     private static Image DecodeImage(byte[] bytes)
     {
-        Bitmap image;
-        if (TryGetRawDimensions(bytes.Length, out var width, out var height))
-        {
-            image = DecodeBgr24(bytes, width, height);
-        }
-        else
-        {
-            using var stream = new MemoryStream(bytes, writable: false);
-            using var source = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
-            image = new Bitmap(source);
-        }
-        image.RotateFlip(RotateFlipType.Rotate180FlipNone);
-        return image;
-    }
-
-    private static bool TryGetRawDimensions(int length, out int width, out int height)
-    {
-        (width, height) = length switch
-        {
-            800 * 480 * 3 => (800, 480),
-            176 * 112 * 3 => (176, 112),
-            112 * 112 * 3 => (112, 112),
-            _ => (0, 0),
-        };
-        return width != 0;
-    }
-
-    private static Bitmap DecodeBgr24(byte[] bytes, int width, int height)
-    {
-        var bitmap = new Bitmap(width, height, PixelFormat.Format24bppRgb);
-        var data = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format24bppRgb);
-        try
-        {
-            var sourceStride = width * 3;
-            for (var y = 0; y < height; y++)
-                Marshal.Copy(bytes, y * sourceStride, IntPtr.Add(data.Scan0, y * data.Stride), sourceStride);
-        }
-        finally { bitmap.UnlockBits(data); }
-        return bitmap;
+        using var stream = new MemoryStream(bytes, writable: false);
+        using var source = Image.FromStream(stream, useEmbeddedColorManagement: false, validateImageData: true);
+        return new Bitmap(source);
     }
 
     protected override void Dispose(bool disposing)

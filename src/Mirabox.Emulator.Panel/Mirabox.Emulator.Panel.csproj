@@ -7,7 +7,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AssemblyName>MirageDeck</AssemblyName>
-    <Description>Independent N4 Pro-compatible virtual HID panel for development and interoperability testing.</Description>
+    <Description>Independent Stream Deck +-compatible virtual HID panel for development and interoperability testing.</Description>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\Mirabox.Emulator.Core\Mirabox.Emulator.Core.csproj" />
