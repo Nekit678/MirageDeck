@@ -1,9 +1,9 @@
 [Version]
 Signature="$WINDOWS NT$"
-Class=HIDClass
-ClassGuid={745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Class=USB
+ClassGuid={36FC9E60-C465-11CF-8056-444553540000}
 Provider=%Provider%
-DriverVer=07/13/2026,1.0.13.0
+DriverVer=07/18/2026,1.0.15.0
 CatalogFile=StreamDeckPlusEmulator.cat
 PnpLockdown=1
 
@@ -14,7 +14,7 @@ DefaultDestDir=13
 1=%DiskName%,,,
 
 [SourceDisksFiles]
-StreamDeckPlusEmulator.dll=1
+StreamDeckPlusEmulator.sys=1
 
 [Manufacturer]
 %Manufacturer%=Models,NT$ARCH$.10.0...22000
@@ -24,44 +24,29 @@ StreamDeckPlusEmulator.dll=1
 
 [StreamDeckPlusEmulator.NT]
 CopyFiles=DriverCopy
-Include=MsHidUmdf.inf
-Needs=MsHidUmdf.NT
-Include=WUDFRD.inf
-Needs=WUDFRD_LowerFilter.NT
-
-[StreamDeckPlusEmulator.NT.hw]
-Include=MsHidUmdf.inf
-Needs=MsHidUmdf.NT.hw
-Include=WUDFRD.inf
-Needs=WUDFRD_LowerFilter.NT.hw
-
-[StreamDeckPlusEmulator.NT.Services]
-Include=MsHidUmdf.inf
-Needs=MsHidUmdf.NT.Services
-Include=WUDFRD.inf
-Needs=WUDFRD_LowerFilter.NT.Services
-
-[StreamDeckPlusEmulator.NT.Filters]
-Include=WUDFRD.inf
-Needs=WUDFRD_LowerFilter.NT.Filters
-
-[StreamDeckPlusEmulator.NT.Wdf]
-UmdfService="StreamDeckPlusEmulator",DriverInstall
-UmdfServiceOrder=StreamDeckPlusEmulator
-UmdfKernelModeClientPolicy=AllowKernelModeClients
-UmdfFileObjectPolicy=AllowNullAndUnknownFileObjects
-UmdfMethodNeitherAction=Copy
-UmdfFsContextUsePolicy=CanUseFsContext2
-
-[DriverInstall]
-UmdfLibraryVersion=$UMDFVERSION$
-ServiceBinary="%13%\StreamDeckPlusEmulator.dll"
 
 [DriverCopy]
-StreamDeckPlusEmulator.dll
+StreamDeckPlusEmulator.sys
+
+[StreamDeckPlusEmulator.NT.Services]
+AddService=StreamDeckPlusEmulator,0x00000002,DriverService
+
+[DriverService]
+DisplayName=%ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary="%13%\StreamDeckPlusEmulator.sys"
+
+[StreamDeckPlusEmulator.NT.Wdf]
+KmdfService=StreamDeckPlusEmulator,DriverInstall
+
+[DriverInstall]
+KmdfLibraryVersion=$KMDFVERSION$
 
 [Strings]
 Provider="MirageDeck Project"
 Manufacturer="MirageDeck Project"
-DiskName="MirageDeck virtual HID installation media"
-DeviceDesc="MirageDeck Virtual HID compatible with Elgato Stream Deck +"
+DiskName="MirageDeck virtual USB installation media"
+DeviceDesc="MirageDeck Virtual USB controller for Elgato Stream Deck +"
+ServiceDesc="MirageDeck Stream Deck + USB emulator"

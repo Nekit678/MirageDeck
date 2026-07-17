@@ -5,10 +5,9 @@ testing. It is not a production-ready public release.
 
 ## Before installation
 
-The package contains a user-mode UMDF 2 virtual HID driver. It does not contain
-a MirageDeck kernel-mode `.sys` driver. Its temporary self-signed certificate
-is unique to this CI build, and only the public `.cer` is included. The private
-key is deleted from the runner after packaging.
+The package contains a kernel-mode KMDF/UDE virtual USB driver. Its temporary
+self-signed certificate is unique to this CI build, and only the public `.cer`
+is included. The private key is deleted from the runner after packaging.
 
 Installing the package adds that public certificate to the local machine
 `Root` and `TrustedPublisher` stores. Review the displayed subject, issuer,
@@ -33,6 +32,10 @@ Control policies may still block the package.
    system. If certificate trust must be added, it shows the certificate
    identity and SHA-256 fingerprint and continues only after you type
    `INSTALL` exactly.
+
+   The installer also requires Windows Test Mode for this self-signed kernel
+   driver. If requested, run `bcdedit.exe /set testsigning on`, restart, and
+   retry. Secure Boot must be disabled before Windows can enable Test Mode.
 
 4. Start `panel\MirageDeck.exe`, wait for `ГОТОВО` and
    `HID 0FD9:0084 (Stream Deck +) готов к работе`, then start the Elgato
@@ -63,9 +66,8 @@ package remains in the Driver Store unless its removal is explicitly requested:
 
 Checksums, package metadata, build commit/run information, Authenticode signer
 matching, expected file names and versions, and checks for private keys and
-unexpected executables are handled by `verify-package.ps1`. Test Mode does not
-need to be enabled and Secure Boot does not need to be disabled for this UMDF 2
-package.
+unexpected executables are handled by `verify-package.ps1`. This development
+package requires Test Mode because its kernel driver is self-signed.
 
 A public release that does not add a custom root certificate must use the
 current applicable Microsoft Hardware Developer Program signing path. The
@@ -79,4 +81,4 @@ for software compatibility and do not indicate USB-IF certification or
 ownership of the corresponding VID/PID.
 
 Third-party notices and license texts are included in
-`THIRD_PARTY_NOTICES.md`, `LICENSE`, and `driver/LICENSE-MS-PL`.
+`THIRD_PARTY_NOTICES.md` and `LICENSE`.

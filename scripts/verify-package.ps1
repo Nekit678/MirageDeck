@@ -74,7 +74,7 @@ if (-not (Test-Path -LiteralPath $packageInfoFile -PathType Leaf)) {
 
 $packageInfo = Get-Content -LiteralPath $packageInfoFile -Raw | ConvertFrom-Json
 $requiredProperties = @(
-  'schemaVersion', 'product', 'packageKind', 'version', 'driverInf',
+  'schemaVersion', 'product', 'packageKind', 'version', 'driverKind', 'driverInf',
   'driverBinary', 'driverCatalog', 'panelExecutable', 'certificateFile',
   'certificateThumbprintSha1', 'certificateFingerprintSha256'
 )
@@ -83,15 +83,18 @@ foreach ($property in $requiredProperties) {
     throw "PACKAGE-INFO.json is missing '$property'"
   }
 }
-if ($packageInfo.schemaVersion -ne 1 -or $packageInfo.product -ne 'MirageDeck') {
+if ($packageInfo.schemaVersion -ne 2 -or $packageInfo.product -ne 'MirageDeck') {
   throw "Unsupported package metadata"
 }
 if ($packageInfo.packageKind -ne 'development') {
   throw "This verifier only accepts MirageDeck development packages"
 }
+if ($packageInfo.driverKind -ne 'kernel-ude') {
+  throw "This package does not contain the expected UDE kernel driver"
+}
 $expectedLayout = @{
   driverInf = 'driver/StreamDeckPlusEmulator.inf'
-  driverBinary = 'driver/StreamDeckPlusEmulator.dll'
+  driverBinary = 'driver/StreamDeckPlusEmulator.sys'
   driverCatalog = 'driver/StreamDeckPlusEmulator.cat'
   panelExecutable = 'panel/MirageDeck.exe'
   certificateFile = 'driver/MirageDeck-CI-Test.cer'
@@ -138,7 +141,6 @@ Write-Host "[verify] All package files are covered by valid SHA-256 checksums."
 
 $requiredFiles = @(
   'BUILD-INFO.txt', 'START-HERE.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md',
-  'driver/LICENSE-MS-PL',
   'scripts/install-driver.ps1', 'scripts/uninstall-driver.ps1',
   'scripts/verify-package.ps1', 'scripts/RootDeviceInstaller.cs',
   $packageInfo.driverInf, $packageInfo.driverBinary, $packageInfo.driverCatalog,
@@ -207,7 +209,8 @@ if ($inf -notmatch '(?im)^Provider="MirageDeck Project"\s*$' -or
   throw "The INF provider/manufacturer identity is not MirageDeck Project"
 }
 if ($inf -notmatch '(?im)^CatalogFile=StreamDeckPlusEmulator\.cat\s*$' -or
-    $inf -notmatch '(?im)^ServiceBinary="%13%\\StreamDeckPlusEmulator\.dll"\s*$' -or
+    $inf -notmatch '(?im)^ServiceBinary="%13%\\StreamDeckPlusEmulator\.sys"\s*$' -or
+    $inf -notmatch '(?im)^Class=USB\s*$' -or
     $inf -notmatch '(?im)^%DeviceDesc%=StreamDeckPlusEmulator,Root\\StreamDeckPlusEmulator\s*$') {
   throw "The INF package names or compatibility hardware ID are unexpected"
 }

@@ -87,7 +87,7 @@ jobs:
           -p:DebugType=None
           -p:DebugSymbols=false
 
-      - name: Build UMDF driver
+      - name: Build KMDF UDE driver
         shell: pwsh
         run: >-
           msbuild driver/StreamDeckPlusEmulator.vcxproj

@@ -5,7 +5,7 @@
 и её [general reference](https://docs.elgato.com/streamdeck/hid/general/).
 Все многобайтовые числа little-endian.
 
-## Identity и descriptor
+## USB identity и HID descriptor
 
 | Поле | Значение |
 | --- | --- |
@@ -13,6 +13,8 @@
 | VID / PID | `0FD9:0084` |
 | Manufacturer / Product | `Elgato` / `Stream Deck +` |
 | Usage page / usage | vendor-defined `FF00:0001` |
+| USB topology | UDE host controller → `USB\VID_0FD9&PID_0084` → HID interface |
+| USB endpoints | interrupt IN `81` (512), interrupt OUT `01` (1024) |
 | Input report | ID `01`, 512 байт вместе с ID |
 | Output report | ID `02`, 1024 байта вместе с ID |
 | Feature reports | аппаратные IDs `03..08`, `0A`; служебный ID `0B`; все по 32 байта вместе с ID |
@@ -101,7 +103,7 @@ Getter reports:
 
 ## Служебный канал панели
 
-Драйвер перехватывает output и setter feature reports в кольцевую очередь на
+UDE-драйвер перехватывает output и setter feature reports в кольцевую очередь на
 128 элементов. Панель открывает публичную HID collection и использует Feature
 report ID `0B`, поскольку FDO HID-минидрайвера нельзя открыть напрямую для
 custom IOCTL.

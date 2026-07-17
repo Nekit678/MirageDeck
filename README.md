@@ -32,8 +32,9 @@
 > Установка development-пакета добавляет его публичный сертификат в
 > `LocalMachine\Root` и `LocalMachine\TrustedPublisher`. Установщик показывает
 > subject, issuer, срок действия и SHA-256 fingerprint и продолжает только
-> после ввода `INSTALL`. MirageDeck использует UMDF 2 и не содержит собственного
-> kernel-mode `.sys`; Test Mode и отключение Secure Boot не требуются.
+> после ввода `INSTALL`. Для полноценной USB topology MirageDeck использует
+> kernel-mode UDE-драйвер. Самоподписанный development-пакет запускается только
+> в Windows Test Mode; при включённом Secure Boot Test Mode недоступен.
 
 1. Скачайте последний успешный артефакт из
    [Actions → Build Windows package](https://github.com/Nekit678/MirageDeck/actions/workflows/build-windows.yml).
@@ -45,6 +46,11 @@
    .\scripts\verify-package.ps1
    .\scripts\install-driver.ps1 -DriverDirectory .\driver
    ```
+
+   Если установщик сообщает, что Test Mode выключен, выполните
+   `bcdedit.exe /set testsigning on`, перезагрузите Windows и повторите
+   установку. Если изменение блокирует Secure Boot, его необходимо сначала
+   отключить в UEFI. Production-пакет должен иметь подпись Microsoft.
 
 4. Запустите `panel\MirageDeck.exe`, дождитесь сообщения
    `HID 0FD9:0084 (Stream Deck +) готов к работе`, затем откройте приложение
@@ -79,7 +85,7 @@ dotnet run --project .\src\Mirabox.Emulator.Panel -c Release
 
 ```mermaid
 flowchart LR
-    APP[Elgato Stream Deck app] <-->|HID reports| DRV[UMDF 2 virtual HID]
+    APP[Elgato Stream Deck app] <-->|USB topology + HID reports| DRV[KMDF UDE virtual USB device]
     DRV <-->|panel Feature report 0B| PANEL[WinForms panel]
     PANEL --> CORE[Stream Deck + codec]
     CORE --> UI[8 keys · touch strip · 4 encoders]
@@ -87,7 +93,7 @@ flowchart LR
 
 | Каталог | Назначение |
 | --- | --- |
-| [`driver/`](driver/) | UMDF 2 виртуальный HID `0FD9:0084` |
+| [`driver/`](driver/) | KMDF/UDE виртуальный USB HID `0FD9:0084` |
 | [`src/Mirabox.Emulator.Core/`](src/Mirabox.Emulator.Core/) | профиль, input reports и decoder |
 | [`src/Mirabox.Emulator.Panel/`](src/Mirabox.Emulator.Panel/) | Windows-панель и служебный канал |
 | [`test/`](test/) | тесты формирования и декодирования reports |
@@ -95,9 +101,8 @@ flowchart LR
 
 ## Ограничения
 
-- Эмулируется HID-функция Stream Deck + `0FD9:0084`, но не физическая USB
-  topology. Приложения, проверяющие USB parent или дополнительные интерфейсы,
-  могут не обнаружить устройство.
+- Эмулируются USB device/configuration/interface/endpoint descriptors и HID-
+  функция Stream Deck + `0FD9:0084`; внешние USB hubs не эмулируются.
 - Порог `PRESS` в панели установлен в 500 мс; аппаратный порог firmware может
   отличаться.
 - Полный LCD-кадр `800×480` отображается в абстрактной раскладке панели; точная
@@ -127,6 +132,6 @@ Stream Deck +, а также `VID 0FD9 / PID 0084` используются то
 совместимости; эти идентификаторы не выделены MirageDeck.
 
 Дистрибутив не содержит firmware или binaries Elgato, приватных ключей либо
-извлечённых proprietary assets. Оригинальный код распространяется по MIT;
-файлы драйвера, производные от Microsoft `vhidmini2`, — по MS-PL. См.
-[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+извлечённых proprietary assets. Оригинальный код распространяется по MIT.
+Драйвер использует встроенное в Windows расширение UdeCx, которое не входит в
+дистрибутив. См. [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
