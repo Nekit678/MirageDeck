@@ -90,7 +90,7 @@ jobs:
       - name: Build UMDF driver
         shell: pwsh
         run: >-
-          msbuild driver/MiraboxN4Pro.vcxproj
+          msbuild driver/StreamDeckPlusEmulator.vcxproj
           /m
           /p:Configuration=Release
           /p:Platform=x64

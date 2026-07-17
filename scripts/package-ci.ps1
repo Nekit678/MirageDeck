@@ -64,11 +64,11 @@ Write-Host "[package] Validating the SetupAPI root-device helper"
 Add-Type -Path "scripts/RootDeviceInstaller.cs"
 Write-Host "[package] Locating build outputs"
 
-$driverDll = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.dll -File -Recurse |
+$driverDll = Get-ChildItem $DriverSearchRoot -Filter StreamDeckPlusEmulator.dll -File -Recurse |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-$driverInf = Get-ChildItem $DriverSearchRoot -Filter MiraboxN4Pro.inf -File -Recurse |
+$driverInf = Get-ChildItem $DriverSearchRoot -Filter StreamDeckPlusEmulator.inf -File -Recurse |
   Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
-if (-not $driverDll -or -not $driverInf) { throw "Built MiraboxN4Pro.dll/inf files were not found under $DriverSearchRoot" }
+if (-not $driverDll -or -not $driverInf) { throw "Built StreamDeckPlusEmulator.dll/inf files were not found under $DriverSearchRoot" }
 
 Remove-Item $OutputDirectory -Recurse -Force -ErrorAction SilentlyContinue
 $driverOutput = Join-Path $OutputDirectory "driver"
@@ -109,9 +109,9 @@ try {
   $inf2Cat = Find-WdkTool "inf2cat.exe"
   Write-Host "[package] SignTool: $signTool"
   Write-Host "[package] Inf2Cat: $inf2Cat"
-  $packagedDll = Join-Path $driverOutput "MiraboxN4Pro.dll"
-  $packagedInf = Join-Path $driverOutput "MiraboxN4Pro.inf"
-  $catalog = Join-Path $driverOutput "MiraboxN4Pro.cat"
+  $packagedDll = Join-Path $driverOutput "StreamDeckPlusEmulator.dll"
+  $packagedInf = Join-Path $driverOutput "StreamDeckPlusEmulator.inf"
+  $catalog = Join-Path $driverOutput "StreamDeckPlusEmulator.cat"
   $panelExecutables = @(Get-ChildItem $panelOutput -Filter *.exe -File -Recurse)
   if ($panelExecutables.Count -ne 1) {
     throw "Expected one panel executable, found $($panelExecutables.Count)"
@@ -135,7 +135,7 @@ try {
   Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $panelExecutable.FullName
   Write-Host "[package] Creating driver catalog"
   Invoke-Native $inf2Cat "/driver:$driverOutput" /os:10_X64 /uselocaltime
-  if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create MiraboxN4Pro.cat" }
+  if (-not (Test-Path $catalog)) { throw "Inf2Cat did not create StreamDeckPlusEmulator.cat" }
   Write-Host "[package] Signing and verifying catalog"
   Invoke-Native $signTool sign /v /fd SHA256 /s My /sha1 $certificate.Thumbprint $catalog
   Assert-SignedBy $packagedDll $certificate.Thumbprint
@@ -150,10 +150,10 @@ try {
     product = "MirageDeck"
     packageKind = "development"
     version = $packageVersion
-    hardwareId = "Root\MiraboxN4Pro"
-    driverInf = "driver/MiraboxN4Pro.inf"
-    driverBinary = "driver/MiraboxN4Pro.dll"
-    driverCatalog = "driver/MiraboxN4Pro.cat"
+    hardwareId = "Root\StreamDeckPlusEmulator"
+    driverInf = "driver/StreamDeckPlusEmulator.inf"
+    driverBinary = "driver/StreamDeckPlusEmulator.dll"
+    driverCatalog = "driver/StreamDeckPlusEmulator.cat"
     panelExecutable = $panelRelative
     certificateFile = "driver/MirageDeck-CI-Test.cer"
     certificateSubject = $certificate.Subject

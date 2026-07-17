@@ -1,170 +1,169 @@
-using Mirabox.Emulator.Core;
 using System.Buffers.Binary;
+using Mirabox.Emulator.Core;
 
 var tests = new (string Name, Action Run)[]
 {
-    ("input key packet", TestInputKey),
-    ("input knob packet", TestInputKnob),
-    ("input knob press packet", TestInputKnobPress),
-    ("input secondary tap packet", TestInputSecondaryTap),
-    ("input touch point packet", TestInputTouchPoint),
-    ("input touch contact packets", TestInputTouchContact),
-    ("input swipe packet", TestInputSwipe),
-    ("button mode command", TestButtonMode),
-    ("touchbar mode command", TestTouchBarMode),
-    ("brightness command", TestBrightness),
-    ("fragmented key image", TestImage),
-    ("background image", TestBackground),
-    ("report-id prefix", TestReportIdPrefix),
+    ("button state report", ButtonStateReport),
+    ("encoder button state report", EncoderButtonStateReport),
+    ("encoder rotation report", EncoderRotationReport),
+    ("touch reports", TouchReports),
+    ("button image chunks", ButtonImageChunks),
+    ("interleaved image chunks", InterleavedImageChunks),
+    ("window and full-screen chunks", WindowAndFullScreenChunks),
+    ("partial window chunks", PartialWindowChunks),
+    ("feature commands", FeatureCommands),
+    ("invalid chunks rejected", InvalidChunksRejected),
 };
 
 var failed = 0;
 foreach (var test in tests)
 {
-    try { test.Run(); Console.WriteLine($"PASS {test.Name}"); }
-    catch (Exception error) { failed++; Console.Error.WriteLine($"FAIL {test.Name}: {error.Message}"); }
+    try
+    {
+        test.Run();
+        Console.WriteLine($"PASS {test.Name}");
+    }
+    catch (Exception error)
+    {
+        failed++;
+        Console.Error.WriteLine($"FAIL {test.Name}: {error.Message}");
+    }
 }
-return failed;
+return failed == 0 ? 0 : 1;
 
-static void TestInputKey()
+static void ButtonStateReport()
 {
-    var report = InputReportFactory.Key(0x04, true);
-    Equal(512, report.Length);
-    Equal((byte)'A', report[0]);
-    Equal((byte)'O', report[5]);
-    Equal((byte)0x04, report[9]);
-    Equal((byte)1, report[10]);
-}
-
-static void TestInputKnob()
-{
-    var report = InputReportFactory.KnobRotate(2, -1);
-    Equal((byte)0x90, report[9]);
-    Equal((byte)0, report[10]);
+    var report = InputReportFactory.Buttons([true, false, true, false, false, false, false, true]);
+    Equal(StreamDeckPlusProfile.InputReportLength, report.Length);
+    Bytes([0x01, 0x00, 0x08, 0x00, 1, 0, 1, 0, 0, 0, 0, 1], report[..12]);
 }
 
-static void TestInputKnobPress()
+static void EncoderButtonStateReport()
 {
-    var report = InputReportFactory.KnobPress(0);
-    Equal((byte)0x37, report[9]);
-    Equal((byte)1, report[10]);
+    var report = InputReportFactory.EncoderButtons([false, true, false, true]);
+    Bytes([0x01, 0x03, 0x05, 0x00, 0x00, 0, 1, 0, 1], report[..9]);
 }
 
-static void TestInputSecondaryTap()
+static void EncoderRotationReport()
 {
-    var report = InputReportFactory.SecondaryTap(3);
-    Equal((byte)0x43, report[9]);
-    Equal((byte)0, report[10]);
+    var left = InputReportFactory.EncoderRotate(2, -1);
+    Bytes([0x01, 0x03, 0x05, 0x00, 0x01, 0, 0, 0xFF, 0], left[..9]);
+    var right = InputReportFactory.EncoderRotate(0, 3);
+    Bytes([0x01, 0x03, 0x05, 0x00, 0x01, 3, 0, 0, 0], right[..9]);
 }
 
-static void TestInputTouchPoint()
+static void TouchReports()
 {
-    var report = InputReportFactory.Touch(0x0123, 0x0456);
-    Equal((byte)'A', report[0]);
-    Equal((byte)'C', report[1]);
-    Equal((byte)'K', report[2]);
-    Equal((byte)'A', report[4]);
-    Equal((byte)'R', report[5]);
-    Equal((byte)'X', report[6]);
-    Equal((byte)0x01, report[10]);
-    Equal((byte)0x23, report[11]);
-    Equal((byte)0x04, report[12]);
-    Equal((byte)0x56, report[13]);
+    var tap = InputReportFactory.TouchTap(799, 99);
+    Bytes([0x01, 0x02, 0x0A, 0x00, 0x01, 0, 0x1F, 0x03, 0x63, 0x00], tap[..10]);
+
+    var press = InputReportFactory.TouchPress(400, 50);
+    Equal((byte)0x02, press[4]);
+    Equal((ushort)400, BinaryPrimitives.ReadUInt16LittleEndian(press.AsSpan(6, 2)));
+    Equal((ushort)50, BinaryPrimitives.ReadUInt16LittleEndian(press.AsSpan(8, 2)));
+
+    var flick = InputReportFactory.TouchFlick(10, 20, 700, 80);
+    Bytes([0x01, 0x02, 0x0E, 0x00, 0x03, 0, 10, 0, 20, 0, 0xBC, 0x02, 80, 0], flick[..14]);
 }
 
-static void TestInputTouchContact()
+static void ButtonImageChunks()
 {
-    var down = InputReportFactory.TouchContact(0x0123, true);
-    var up = InputReportFactory.TouchContact(0x0123, false);
-    Equal((byte)'A', down[0]);
-    Equal((byte)'O', down[5]);
-    Equal((byte)'K', down[6]);
-    Equal((byte)0, down[9]);
-    Equal((byte)1, down[10]);
-    Equal((byte)0, up[10]);
-    Equal((byte)0x01, down[11]);
-    Equal((byte)0x23, down[12]);
-    Equal((byte)0x01, up[11]);
-    Equal((byte)0x23, up[12]);
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    var first = OutputChunk(0x07, target: 5, chunk: 0, done: false, [1, 2, 3]);
+    Equal(0, decoder.PushOutput(first).Count);
+    var second = OutputChunk(0x07, target: 5, chunk: 1, done: true, [4, 5]);
+    var update = Single<ButtonImageUpdate>(decoder.PushOutput(second));
+    Equal((byte)5, update.Button);
+    Bytes([1, 2, 3, 4, 5], update.EncodedImage);
 }
 
-static void TestInputSwipe()
+static void InterleavedImageChunks()
 {
-    var left = InputReportFactory.Swipe(true);
-    var right = InputReportFactory.Swipe(false);
-    Equal((byte)0x38, left[9]);
-    Equal((byte)0x39, right[9]);
-    Equal((byte)0, left[10]);
-    Equal((byte)0, right[10]);
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    Equal(0, decoder.PushOutput(OutputChunk(0x07, target: 0, chunk: 0, done: false, [1])).Count);
+    Equal(0, decoder.PushOutput(OutputChunk(0x07, target: 1, chunk: 0, done: false, [2])).Count);
+    var first = Single<ButtonImageUpdate>(decoder.PushOutput(
+        OutputChunk(0x07, target: 0, chunk: 1, done: true, [3])));
+    var second = Single<ButtonImageUpdate>(decoder.PushOutput(
+        OutputChunk(0x07, target: 1, chunk: 1, done: true, [4])));
+    Bytes([1, 3], first.EncodedImage);
+    Bytes([2, 4], second.EncodedImage);
 }
 
-static void TestButtonMode()
+static void WindowAndFullScreenChunks()
 {
-    var packet = Packet("MOD");
-    packet[10] = (byte)'1';
-    var update = Single<TouchModeUpdate>(new MiraboxProtocolDecoder().Push(packet));
-    Equal(false, update.TouchBar);
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    var window = Single<WindowImageUpdate>(decoder.PushOutput(
+        OutputChunk(0x0B, target: 0, chunk: 0, done: true, [0xFF, 0xD8, 0xFF, 0xD9])));
+    Bytes([0xFF, 0xD8, 0xFF, 0xD9], window.EncodedImage);
+
+    var full = Single<FullScreenImageUpdate>(decoder.PushOutput(
+        OutputChunk(0x08, target: 0, chunk: 0, done: true, [9, 8, 7])));
+    Bytes([9, 8, 7], full.EncodedImage);
 }
 
-static void TestTouchBarMode()
+static void PartialWindowChunks()
 {
-    var packet = Packet("MOD");
-    packet[10] = (byte)'2';
-    var update = Single<TouchModeUpdate>(new MiraboxProtocolDecoder().Push(packet));
-    Equal(true, update.TouchBar);
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    var report = new byte[StreamDeckPlusProfile.OutputReportLength];
+    report[0] = 0x02;
+    report[1] = 0x0C;
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(2, 2), 200);
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(4, 2), 0);
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(6, 2), 200);
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(8, 2), 100);
+    report[10] = 1;
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(11, 2), 0);
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(13, 2), 4);
+    report[16] = 1; report[17] = 3; report[18] = 3; report[19] = 7;
+
+    var update = Single<PartialWindowImageUpdate>(decoder.PushOutput(report));
+    Equal((ushort)200, update.X);
+    Equal((ushort)100, update.Height);
+    Bytes([1, 3, 3, 7], update.EncodedImage);
 }
 
-static void TestBrightness()
+static void FeatureCommands()
 {
-    var packet = Packet("LIG");
-    packet[10] = 42;
-    var update = Single<BrightnessUpdate>(new MiraboxProtocolDecoder().Push(packet));
-    Equal((byte)42, update.Value);
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    var feature = new byte[StreamDeckPlusProfile.FeatureReportLength];
+    feature[0] = 0x03;
+    feature[1] = 0x08;
+    feature[2] = 73;
+    Equal((byte)73, Single<BrightnessUpdate>(decoder.PushFeature(feature)).Value);
+
+    feature[1] = 0x06;
+    feature[2] = 7;
+    feature[3] = 10; feature[4] = 20; feature[5] = 30;
+    var fill = Single<FillButtonColorUpdate>(decoder.PushFeature(feature));
+    Equal((byte)7, fill.Button);
+    Equal((byte)30, fill.Blue);
+
+    feature[1] = 0x0D;
+    BinaryPrimitives.WriteInt32LittleEndian(feature.AsSpan(2, 4), 900);
+    Equal(900, Single<SleepDurationUpdate>(decoder.PushFeature(feature)).Seconds);
 }
 
-static void TestImage()
+static void InvalidChunksRejected()
 {
-    var bytes = Enumerable.Range(0, 1500).Select(i => (byte)(i % 251)).ToArray();
-    var command = Packet("BAT");
-    BinaryPrimitives.WriteUInt32BigEndian(command.AsSpan(8, 4), (uint)bytes.Length);
-    command[12] = 11;
-    var decoder = new MiraboxProtocolDecoder();
-    Equal(0, decoder.Push(command).Count);
-    var first = new byte[1024];
-    bytes.AsSpan(0, 1024).CopyTo(first);
-    Equal(0, decoder.Push(first).Count);
-    var second = new byte[1024];
-    bytes.AsSpan(1024).CopyTo(second);
-    var update = Single<ImageUpdate>(decoder.Push(second));
-    Equal((byte)11, update.Slot);
-    True(bytes.SequenceEqual(update.EncodedImage));
+    var decoder = new StreamDeckPlusProtocolDecoder();
+    Throws<InvalidDataException>(() => decoder.PushOutput(
+        OutputChunk(0x07, target: 8, chunk: 0, done: true, [1])));
+    Throws<InvalidDataException>(() => decoder.PushOutput(
+        OutputChunk(0x07, target: 0, chunk: 2, done: true, [1])));
 }
 
-static void TestBackground()
+static byte[] OutputChunk(byte command, byte target, ushort chunk, bool done, byte[] data)
 {
-    var command = Packet("LOG");
-    BinaryPrimitives.WriteUInt32BigEndian(command.AsSpan(8, 4), 4);
-    var decoder = new MiraboxProtocolDecoder();
-    decoder.Push(command);
-    var data = new byte[1024];
-    data[0] = 0xFF; data[1] = 0xD8; data[2] = 0xFF; data[3] = 0xD9;
-    var update = Single<BackgroundUpdate>(decoder.Push(data));
-    Equal(4, update.EncodedImage.Length);
-}
-
-static void TestReportIdPrefix()
-{
-    var packet = new byte[1025];
-    Packet("STP").CopyTo(packet, 1);
-    _ = Single<RefreshUpdate>(new MiraboxProtocolDecoder().Push(packet));
-}
-
-static byte[] Packet(string command)
-{
-    var packet = new byte[1024];
-    "CRT\0\0"u8.CopyTo(packet);
-    System.Text.Encoding.ASCII.GetBytes(command).CopyTo(packet, 5);
-    return packet;
+    var report = new byte[StreamDeckPlusProfile.OutputReportLength];
+    report[0] = 0x02;
+    report[1] = command;
+    report[2] = target;
+    report[3] = done ? (byte)1 : (byte)0;
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(4, 2), checked((ushort)data.Length));
+    BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(6, 2), chunk);
+    data.CopyTo(report, 8);
+    return report;
 }
 
 static T Single<T>(IReadOnlyList<DeviceUpdate> updates) where T : DeviceUpdate
@@ -178,7 +177,15 @@ static void Equal<T>(T expected, T actual) where T : IEquatable<T>
     if (!expected.Equals(actual)) throw new Exception($"Expected {expected}, got {actual}");
 }
 
-static void True(bool value)
+static void Bytes(byte[] expected, byte[] actual)
 {
-    if (!value) throw new Exception("Expected true");
+    if (!expected.SequenceEqual(actual))
+        throw new Exception($"Expected {Convert.ToHexString(expected)}, got {Convert.ToHexString(actual)}");
+}
+
+static void Throws<T>(Action action) where T : Exception
+{
+    try { action(); }
+    catch (T) { return; }
+    throw new Exception($"Expected {typeof(T).Name}");
 }

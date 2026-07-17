@@ -35,8 +35,9 @@ Control policies may still block the package.
    `INSTALL` exactly.
 
 4. Start `panel\MirageDeck.exe`, wait for `ГОТОВО` and
-   `HID 5548:1021 (Global) готов к работе`, then start Stream Dock. If the
-   installer requests a restart, restart Windows before opening the panel.
+   `HID 0FD9:0084 (Stream Deck +) готов к работе`, then start the Elgato
+   Stream Deck app. If the installer requests a restart, restart Windows before
+   opening the panel.
 
 ## Removal
 
@@ -72,10 +73,10 @@ eligibility and publication rules for attestation and HLK/WHQL signing must be
 checked against current Microsoft documentation before each release.
 
 MirageDeck is an independent interoperability project and is not affiliated
-with, authorized by, endorsed by, or sponsored by Mirabox, HOTSPOTEK, Microsoft,
-or USB-IF. Emulated N4 Pro identifiers are used only where necessary for
-software compatibility and do not indicate USB-IF certification or ownership
-of the corresponding VID/PID.
+with, authorized by, endorsed by, or sponsored by Elgato, Corsair, Microsoft,
+or USB-IF. Emulated Stream Deck + identifiers are used only where necessary
+for software compatibility and do not indicate USB-IF certification or
+ownership of the corresponding VID/PID.
 
 Third-party notices and license texts are included in
 `THIRD_PARTY_NOTICES.md`, `LICENSE`, and `driver/LICENSE-MS-PL`.

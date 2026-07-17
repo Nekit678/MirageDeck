@@ -6,7 +6,7 @@
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{97D8DBD7-BF80-4B0E-92F9-41696B69173C}</ProjectGuid>
-    <RootNamespace>MiraboxN4Pro</RootNamespace>
+    <RootNamespace>StreamDeckPlusEmulator</RootNamespace>
     <UMDF_VERSION_MAJOR>2</UMDF_VERSION_MAJOR>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -20,7 +20,7 @@
     <UseDebugLibraries Condition="'$(Configuration)'=='Release'">false</UseDebugLibraries>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <PropertyGroup><TargetName>MiraboxN4Pro</TargetName></PropertyGroup>
+  <PropertyGroup><TargetName>StreamDeckPlusEmulator</TargetName></PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);_UNICODE;UNICODE</PreprocessorDefinitions>
@@ -35,7 +35,7 @@
     <ClCompile Include="util.c" />
     <ClInclude Include="vhidmini.h" />
     <ClInclude Include="common.h" />
-    <Inf Include="MiraboxN4Pro.inx">
+    <Inf Include="StreamDeckPlusEmulator.inx">
       <SpecifyDriverVerDirectiveDate>true</SpecifyDriverVerDirectiveDate>
       <DateStamp>07/13/2026</DateStamp>
       <SpecifyDriverDirectiveVersion>true</SpecifyDriverDirectiveVersion>

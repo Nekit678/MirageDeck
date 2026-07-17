@@ -4,7 +4,7 @@ Class=HIDClass
 ClassGuid={745a17a0-74d3-11d0-b6fe-00a0c90f57da}
 Provider=%Provider%
 DriverVer=07/13/2026,1.0.13.0
-CatalogFile=MiraboxN4Pro.cat
+CatalogFile=StreamDeckPlusEmulator.cat
 PnpLockdown=1
 
 [DestinationDirs]
@@ -14,40 +14,40 @@ DefaultDestDir=13
 1=%DiskName%,,,
 
 [SourceDisksFiles]
-MiraboxN4Pro.dll=1
+StreamDeckPlusEmulator.dll=1
 
 [Manufacturer]
 %Manufacturer%=Models,NT$ARCH$.10.0...22000
 
 [Models.NT$ARCH$.10.0...22000]
-%DeviceDesc%=MiraboxN4Pro,Root\MiraboxN4Pro
+%DeviceDesc%=StreamDeckPlusEmulator,Root\StreamDeckPlusEmulator
 
-[MiraboxN4Pro.NT]
+[StreamDeckPlusEmulator.NT]
 CopyFiles=DriverCopy
 Include=MsHidUmdf.inf
 Needs=MsHidUmdf.NT
 Include=WUDFRD.inf
 Needs=WUDFRD_LowerFilter.NT
 
-[MiraboxN4Pro.NT.hw]
+[StreamDeckPlusEmulator.NT.hw]
 Include=MsHidUmdf.inf
 Needs=MsHidUmdf.NT.hw
 Include=WUDFRD.inf
 Needs=WUDFRD_LowerFilter.NT.hw
 
-[MiraboxN4Pro.NT.Services]
+[StreamDeckPlusEmulator.NT.Services]
 Include=MsHidUmdf.inf
 Needs=MsHidUmdf.NT.Services
 Include=WUDFRD.inf
 Needs=WUDFRD_LowerFilter.NT.Services
 
-[MiraboxN4Pro.NT.Filters]
+[StreamDeckPlusEmulator.NT.Filters]
 Include=WUDFRD.inf
 Needs=WUDFRD_LowerFilter.NT.Filters
 
-[MiraboxN4Pro.NT.Wdf]
-UmdfService="MiraboxN4Pro",DriverInstall
-UmdfServiceOrder=MiraboxN4Pro
+[StreamDeckPlusEmulator.NT.Wdf]
+UmdfService="StreamDeckPlusEmulator",DriverInstall
+UmdfServiceOrder=StreamDeckPlusEmulator
 UmdfKernelModeClientPolicy=AllowKernelModeClients
 UmdfFileObjectPolicy=AllowNullAndUnknownFileObjects
 UmdfMethodNeitherAction=Copy
@@ -55,13 +55,13 @@ UmdfFsContextUsePolicy=CanUseFsContext2
 
 [DriverInstall]
 UmdfLibraryVersion=$UMDFVERSION$
-ServiceBinary="%13%\MiraboxN4Pro.dll"
+ServiceBinary="%13%\StreamDeckPlusEmulator.dll"
 
 [DriverCopy]
-MiraboxN4Pro.dll
+StreamDeckPlusEmulator.dll
 
 [Strings]
 Provider="MirageDeck Project"
 Manufacturer="MirageDeck Project"
 DiskName="MirageDeck virtual HID installation media"
-DeviceDesc="MirageDeck Virtual HID compatible with Mirabox N4 Pro"
+DeviceDesc="MirageDeck Virtual HID compatible with Elgato Stream Deck +"

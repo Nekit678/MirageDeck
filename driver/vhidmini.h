@@ -8,9 +8,6 @@ See LICENSE-MS-PL.
 
 Modifications Copyright (c) 2026 Nikita Rybakov.
 
-Module Name:
-    vhidmini.h
-
 --*/
 #pragma once
 
@@ -32,22 +29,17 @@ typedef struct _DEVICE_CONTEXT {
     HID_DEVICE_ATTRIBUTES HidAttributes;
     HID_DESCRIPTOR HidDescriptor;
     PHID_REPORT_DESCRIPTOR ReportDescriptor;
-    UCHAR InputRing[N4PRO_RING_CAPACITY][N4PRO_INPUT_REPORT_SIZE];
+    UCHAR InputRing[STREAMDECK_RING_CAPACITY][STREAMDECK_INPUT_REPORT_SIZE];
     ULONG InputHead;
     ULONG InputCount;
-    UCHAR OutputRing[N4PRO_RING_CAPACITY][N4PRO_OUTPUT_REPORT_SIZE];
-    ULONG OutputHead;
-    ULONG OutputCount;
-    ULONG OutputSequence;
-    ULONG TransferBytesRemaining;
-    USHORT TouchReleaseX;
-    ULONG LastWriteStage;
-    NTSTATUS LastWriteStatus;
-    ULONG LastWriteInputLength;
-    ULONG LastWriteOutputLength;
+    MIRAGE_CAPTURED_REPORT CaptureRing[STREAMDECK_RING_CAPACITY];
+    ULONG CaptureHead;
+    ULONG CaptureCount;
+    LONG SleepDurationSeconds;
 } DEVICE_CONTEXT, *PDEVICE_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(DEVICE_CONTEXT, GetDeviceContext);
 
 NTSTATUS RequestCopyFromBuffer(WDFREQUEST Request, const VOID* Buffer, size_t Length);
 NTSTATUS RequestGetHidXferPacketToRead(WDFREQUEST Request, HID_XFER_PACKET* Packet);
+NTSTATUS RequestGetHidXferPacketToWrite(WDFREQUEST Request, HID_XFER_PACKET* Packet);

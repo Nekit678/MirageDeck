@@ -90,9 +90,9 @@ if ($packageInfo.packageKind -ne 'development') {
   throw "This verifier only accepts MirageDeck development packages"
 }
 $expectedLayout = @{
-  driverInf = 'driver/MiraboxN4Pro.inf'
-  driverBinary = 'driver/MiraboxN4Pro.dll'
-  driverCatalog = 'driver/MiraboxN4Pro.cat'
+  driverInf = 'driver/StreamDeckPlusEmulator.inf'
+  driverBinary = 'driver/StreamDeckPlusEmulator.dll'
+  driverCatalog = 'driver/StreamDeckPlusEmulator.cat'
   panelExecutable = 'panel/MirageDeck.exe'
   certificateFile = 'driver/MirageDeck-CI-Test.cer'
 }
@@ -206,9 +206,9 @@ if ($inf -notmatch '(?im)^Provider="MirageDeck Project"\s*$' -or
     $inf -notmatch '(?im)^Manufacturer="MirageDeck Project"\s*$') {
   throw "The INF provider/manufacturer identity is not MirageDeck Project"
 }
-if ($inf -notmatch '(?im)^CatalogFile=MiraboxN4Pro\.cat\s*$' -or
-    $inf -notmatch '(?im)^ServiceBinary="%13%\\MiraboxN4Pro\.dll"\s*$' -or
-    $inf -notmatch '(?im)^%DeviceDesc%=MiraboxN4Pro,Root\\MiraboxN4Pro\s*$') {
+if ($inf -notmatch '(?im)^CatalogFile=StreamDeckPlusEmulator\.cat\s*$' -or
+    $inf -notmatch '(?im)^ServiceBinary="%13%\\StreamDeckPlusEmulator\.dll"\s*$' -or
+    $inf -notmatch '(?im)^%DeviceDesc%=StreamDeckPlusEmulator,Root\\StreamDeckPlusEmulator\s*$') {
   throw "The INF package names or compatibility hardware ID are unexpected"
 }
 

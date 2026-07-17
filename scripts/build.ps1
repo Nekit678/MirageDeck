@@ -7,5 +7,4 @@ dotnet build "$root\src\Mirabox.Emulator.Panel\Mirabox.Emulator.Panel.csproj" -c
 $msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
   -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe | Select-Object -First 1
 if (-not $msbuild) { throw "Visual Studio 2022 + WDK не найдены" }
-& $msbuild "$root\driver\MiraboxN4Pro.vcxproj" /p:Configuration=$Configuration /p:Platform=x64 /m
-
+& $msbuild "$root\driver\StreamDeckPlusEmulator.vcxproj" /p:Configuration=$Configuration /p:Platform=x64 /m

@@ -21,7 +21,7 @@ function Get-MirageDeckRootDevice {
         -InstanceId $_.InstanceId `
         -KeyName "DEVPKEY_Device_HardwareIds" `
         -ErrorAction SilentlyContinue
-      @($hardwareIds.Data) -contains "Root\MiraboxN4Pro"
+      @($hardwareIds.Data) -contains "Root\StreamDeckPlusEmulator"
     }
 }
 
@@ -62,8 +62,8 @@ if (-not $DriverDirectory) {
     Join-Path (Split-Path -Parent $PSScriptRoot) "driver\x64\Debug"
   }
 }
-$inf = Get-ChildItem $DriverDirectory -Filter MiraboxN4Pro.inf -File -Recurse | Select-Object -First 1
-if (-not $inf) { throw "MiraboxN4Pro.inf was not found under $DriverDirectory" }
+$inf = Get-ChildItem $DriverDirectory -Filter StreamDeckPlusEmulator.inf -File -Recurse | Select-Object -First 1
+if (-not $inf) { throw "StreamDeckPlusEmulator.inf was not found under $DriverDirectory" }
 if ($packageInfo) {
   $expectedInf = [IO.Path]::GetFullPath((Join-Path $packageRoot $packageInfo.driverInf))
   if ($inf.FullName -ne $expectedInf) {
@@ -145,7 +145,7 @@ if ($existingDevices.Count -gt 0) {
   Write-Host "Updating driver for $($existingDevices.Count) existing MirageDeck virtual device(s)..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Update(
     $inf.FullName,
-    "Root\MiraboxN4Pro"
+    "Root\StreamDeckPlusEmulator"
   )
   foreach ($device in $existingDevices) {
     Invoke-Native -FilePath "pnputil.exe" -Arguments @("/restart-device", $device.InstanceId)
@@ -154,7 +154,7 @@ if ($existingDevices.Count -gt 0) {
   Write-Host "Creating the persistent MirageDeck virtual HID device..."
   $rebootRequired = [Mirabox.Emulator.Install.RootDeviceInstaller]::Install(
     $inf.FullName,
-    "Root\MiraboxN4Pro"
+    "Root\StreamDeckPlusEmulator"
   )
 }
 Invoke-Native -FilePath "pnputil.exe" -Arguments @("/scan-devices")
@@ -162,5 +162,5 @@ Invoke-Native -FilePath "pnputil.exe" -Arguments @("/scan-devices")
 if ($rebootRequired) {
   Write-Host "The MirageDeck virtual HID was installed. Restart Windows before launching the panel."
 } else {
-  Write-Host "The MirageDeck virtual HID was installed. Launch the panel, then Stream Dock."
+  Write-Host "The MirageDeck virtual HID was installed. Launch the panel, then the Elgato Stream Deck app."
 }
