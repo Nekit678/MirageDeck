@@ -425,7 +425,7 @@ EvtControlUrb(WDFQUEUE Queue, WDFREQUEST Request, size_t OutputLength,
     WDF_USB_CONTROL_SETUP_PACKET setup;
     PUCHAR buffer;
     ULONG bufferLength;
-    ULONG reportLength;
+    ULONG reportLength = 0;
     UCHAR report[STREAMDECK_INPUT_REPORT_SIZE];
     UCHAR descriptorType;
     UCHAR reportType;
